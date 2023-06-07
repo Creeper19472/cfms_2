@@ -138,7 +138,9 @@ def mainloop():
             target=ConnHandler, name=thread_name, args=(), kwargs={
                 "conn": conn,
                 "addr": addr,
-                "db_conn": maindb.conn
+                "db_conn": maindb.conn,
+                "toml_config": config,
+                "root_abspath": root_abspath
             }
         )
         Thread.start()
@@ -175,7 +177,7 @@ root_abspath = os.path.dirname(os.path.abspath(__file__))
 print(root_abspath)
 ## 开始执行初始化过程
 
-log = logtool.log(logname="main", filepath=''.join((root_abspath, '/main.log')))
+log = logtool.LogClass(logname="main", filepath=''.join((root_abspath, '/main.log')))
 
 if __name__ == "__main__":
     ### 如果被作为主程序运行，就开始面向前台的准备过程

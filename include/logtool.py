@@ -7,7 +7,7 @@ logtool.py
 可能存在尚待完善的部分。
 """
 
-class log(object):
+class LogClass(object):
     def __init__(
         self, logname, level=(logging.DEBUG, logging.INFO), filepath="default.log"
     ):
