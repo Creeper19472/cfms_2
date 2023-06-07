@@ -10,6 +10,7 @@ import hashlib
 
 import include
 import include.logtool as logtool
+from include.connThread import *
 
 from Crypto.PublicKey import RSA
 
@@ -121,19 +122,51 @@ def dbInit(db_object):
         pri_fp.write(pri_key)
 
 def mainloop():
+    created_count = 0
     while True:
         # 建立客户端连接
         conn, addr = server.accept()      
 
         log.logger.info("连接地址: %s" % str(addr))
+
+        created_count += 1
+
+        actives = threading.enumerate()
     
-        threadName = "Thread-%s" % random.randint(1, 10000)
-        Thread = threading.Thread(
-            target=ConnHandlerObject, args=threadName, kwargs={'root_dir':current_dir, \
-                'rsa_keys': (ekey, fkey),'config': config, 'conn': conn, 'addr': addr}
+        thread_name = f"Thread-{created_count}"
+        Thread = ConnThreads(
+            target=ConnHandler, name=thread_name, args=(), kwargs={
+                "conn": conn,
+                "addr": addr,
+                "db_conn": maindb.conn
+            }
         )
         Thread.start()
-        log.logger.debug(_("A new thread %s has started.") % threadName)
+        log.logger.debug(_("A new thread %s has started.") % thread_name)
+        
+    while True:
+        threadingnum_max = 10000
+        threadings,threadnum = [],None
+        conn, addr = server.accept()  # 等待连接,多个连接的时候就会出现问题,其实返回了两个值
+        log.logger.info(_("New connection: %s") % str(addr))
+        while (threadnum in threadings or threadnum == None) and len(threadings) <=threadingnum_max:
+            threadnum = random.randint(1, threadingnum_max+1)
+        threadings.append(threadnum)
+        if len(threadings) >threadingnum_max:
+            print(f"The maximum number({threadingnum_max}) of connections is reached!")
+            del(threadings[-1])
+            threadnum = None
+        else:        
+            threadName = f"Thread-{threadnum}"
+            Thread = threading.Thread(
+                target=ConnHandlerObject, args=threadName, **{'root_dir':current_dir, \
+                    'rsa_keys': (ekey, fkey),'config': config, 'conn': conn, 'addr': addr}
+            )
+            Thread.start()
+            log.logger.debug(f"A new thread {threadName} has started.")
+            Thread.join()
+            info = threadings.pop(threadnum)
+            log.logger.info(f"The user({info}) disconnected")
 
 # 获取初始绝对路径
 # 结果最后不带斜杠，需要手动添加
@@ -177,7 +210,8 @@ if __name__ == "__main__":
     if not m_cur.fetchone()[0]: # count 为0（False）时执行初始化
         dbInit(maindb)
 
-    server = socket.socket() # 初始化套接字
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
 
     ipv4_addr = (config["connect"]["ipv4_addr"], config["connect"]["port"])
     ipv6_addr = (config["connect"]["ipv6_addr"], config["connect"]["port"])
