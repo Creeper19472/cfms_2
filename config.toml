@@ -1,0 +1,17 @@
+# TOML Configuration File
+
+title = "CFMS Configuration"
+
+[general]
+server_name = "CFMS Server"
+locale = "zh_CN" # 语言代码
+
+[connect]
+ipv4_enabled = true
+ipv6_enabled = false
+ipv4_addr = "0.0.0.0"
+ipv6_addr = ""
+port = 5103
+
+[database]
+db_name = "general.db"
