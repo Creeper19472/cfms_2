@@ -3,6 +3,10 @@ import threading
 import time
 import gettext
 import sys
+import json
+
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
 
 class ConnThreads(threading.Thread):
     def __init__(self, target, name, args=(), kwargs={}):
@@ -37,19 +41,60 @@ class ConnHandler():
         self.locale = self.config['general']['locale']
         self.root_abspath = kwargs["root_abspath"]
 
-        sys.path.append(f"{self.root_abspath}/include/")
+        sys.path.append(f"{self.root_abspath}/include/") # 增加导入位置
+
         from logtool import LogClass
         self.log = LogClass(logname=f"main.connHandler.{self.thread_name}", filepath=f'{self.root_abspath}/main.log')
 
         self.BUFFER_SIZE = 1024
 
+        self.encrypted_connection = False
+        self.__initRSA()
+        
+    def __initRSA(self):
+        with open(f"{self.root_abspath}/content/pri.pem", "rb") as pri_file:
+            self.private_key = RSA.import_key(pri_file.read())
+        self.pri_cipher = PKCS1_OAEP.new(self.private_key)
+
+        with open(f"{self.root_abspath}/content/pub.pem", "rb") as pub_file:
+            self.public_key = RSA.import_key(pub_file.read())
+        self.pub_cipher = PKCS1_OAEP.new(self.public_key)
+
+
     def __send(self, msg):
+        if self.encrypted_connection:
+            pass
         pass
 
     def __recv(self, msg):
-        pass
+        total_data = bytes()
+        while True:
+            # 将收到的数据拼接起来
+            data = self.conn.recv(self.BUFFER_SIZE)
+            total_data += data
+            if len(data) < self.BUFFER_SIZE:
+                break
+        return total_data
 
-    def _doFirstCommunication(self):
+    def _doFirstCommunication(self, conn):
+        receive = self.__recv()
+        if receive == "hello":
+            conn.send("hello")
+        else:
+            conn.send("Unknown request")
+            return False
+        
+        conn.send(json.dumps({
+            "msg": "enableEncryption",
+            "public_key": self.public_key,
+            "code": 0
+        }))
+
+        receive_encrypted = conn.recv(self.BUFFER_SIZE)
+
+        decrypted_data = self.pri_cipher.decrypt(receive_encrypted)
+
+        print(decrypted_data.decode())
         return True
 
     def main(self):
@@ -58,12 +103,12 @@ class ConnHandler():
         es = gettext.translation("connHandler", localedir=self.root_abspath + "/content/locale", languages=[self.locale], fallback=True)
         es.install()
 
-        if not self._doFirstCommunication():
+        if not self._doFirstCommunication(conn):
             conn.close()
             sys.exit()
 
         while True:
-            recv = self.conn.recv(1024)
+            recv = self.conn.recv(self.BUFFER_SIZE)
             conn.send("hello")
             break
 
