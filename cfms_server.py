@@ -8,6 +8,8 @@ import sys, os, json, socket, sqlite3, gettext, time, random, threading
 import tomllib
 import hashlib
 
+import socketserver # 准备切到 socketserver
+
 import include
 import include.logtool as logtool
 from include.connThread import *
@@ -29,6 +31,17 @@ class DB_Sqlite3(object):
 
     def close(self):
         self.conn.close()
+
+
+
+
+if __name__ == "__main__":
+    HOST, PORT = "localhost", 9990
+
+    # Create the server, binding to localhost on port 9999
+    server = socketserver.ThreadingTCPServer((HOST, PORT), MyTCPHandler)    #实例化一个多线程TCPServer
+    print('Wait client . . .')
+    server.serve_forever()
 
 def dbInit(db_object):
     cur = db_object.conn.cursor()
