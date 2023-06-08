@@ -129,7 +129,13 @@ def mainloop(serverd):
         conn.ioctl(socket.SIO_KEEPALIVE_VALS,keepalive)      
         log.logger.info(f"conneaction address: {addr!s}")
         Thread = ConnThreads(
-            target=ConnHandler, kwargs={'root_dir':current_dir, 'rsa_keys': (ekey, fkey),'config': config, 'conn': conn, 'addr': addr}
+            target=ConnHandler, name=thread_name, args=(), kwargs={
+                "conn": conn,
+                "addr": addr,
+                "db_conn": maindb.conn,
+                "toml_config": config,
+                "root_abspath": root_abspath
+            }
         )
         Thread.setDaemon(True)
         Thread.start()
@@ -149,15 +155,15 @@ def stopsocket():
 
 def consoled():
     '''控制台
-    若要添加控制台指令,在字典commanddict中添加即可'''
+    若要添加控制台指令,在字典command_dict中添加即可'''
     log.logger.info("Command example: [command]; ")
     while True:
         try:
             i = input(">")
         except (EOFError,UnboundLocalError):pass
         if i.endswith(";"):
-            commanddict = {"q;":stopsocket,}
-            commanddict[str(i)]()
+            command_dict = {"q;":stopsocket,}
+            command_dict[str(i)]()
                 
             
 
@@ -183,16 +189,16 @@ def main():
         sys.exit()
     log.logger.debug(config)
 
-    starttime = time.time()
-    pythonVersion = sys.version
+    starttime = time.time() # 这里还有个endtime，但我懒得写了
+
     log.logger.info("Starting Classified File Management System - Server...")
-    log.logger.info(f"Server time:{starttime}")    
+    # log.logger.info(f"Server time:{starttime}")    
     log.logger.info(f"Version {CORE_VERSION}")
-    if tuple(sys.version_info)[0] < 3: # 基于Python 3.11 开发，因此低于此版本就无法运行
-        log.logger.fatal(f"This program requires Python 3.11 or higher!!! (Your Python version:{pythonVersion})")
-        log.logger.fatal("Terminating program running!")
+    log.logger.info("Running On: Python %s" % sys.version)
+    if sys.version_info[0] < 3: # 基于Python 3.11 开发，因此低于此版本就无法运行
+        log.logger.fatal("您正在运行的 Python 版本低于本系统的最低要求。")
+        log.logger.fatal("由于此原因，程序无法继续。")
         sys.exit()
-    else:log.logger.info(f"Your Python version:{pythonVersion}")
 
     maindb = DB_Sqlite3(f"{root_abspath}/general.db")
     m_cur = maindb.conn.cursor()
@@ -210,7 +216,7 @@ def main():
     if not m_cur.fetchone()[0]: # count 为0（False）时执行初始化
         dbInit(maindb)
 
-    server = socket.socket()
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
     ipv4_addr = (config["connect"]["ipv4_addr"], config["connect"]["port"])
     ipv6_addr = (config["connect"]["ipv6_addr"], config["connect"]["port"])
@@ -237,5 +243,6 @@ def main():
     finally:
         maindb.close()
         sys.exit()
+        
 if __name__ == "__main__":
     main()
