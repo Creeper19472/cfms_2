@@ -7,13 +7,10 @@ CORE_VERSION = "1.0.0.230607_alpha"
 import sys, os, json, socket, sqlite3, gettext, time, random, threading
 import tomllib
 import hashlib
-
 import socketserver # 准备切到 socketserver
-
 import include
 import include.logtool as logtool
-from include.connThread import *
-
+from include.connThread import * 
 from Crypto.PublicKey import RSA
 
 class DB_Sqlite3(object):
@@ -123,19 +120,15 @@ def dbInit(db_object):
     with open("content/pri.pem", "wb") as pri_fp:
         pri_fp.write(pri_key)
 
-def mainloop():
-    created_count = 0
-    while True:
-        # 建立客户端连接
-        conn, addr = server.accept()      
-
-        log.logger.info("连接地址: %s" % str(addr))
-
-        created_count += 1
-
-        actives = threading.enumerate()
-    
-        thread_name = f"Thread-{created_count}"
+sock_condition =True
+def mainloop(serverd):
+    while sock_condition:
+        """建立客户端连接"""   
+        conn, addr = serverd.accept()
+        keepalive = (1,60*1000,60*1000)
+        conn.setsockopt(socket.SOL_SOCKET,socket.SO_KEEPALIVE, True)#开启TCP保活
+        conn.ioctl(socket.SIO_KEEPALIVE_VALS,keepalive)      
+        log.logger.info(f"conneaction address: {addr!s}")
         Thread = ConnThreads(
             target=ConnHandler, name=thread_name, args=(), kwargs={
                 "conn": conn,
@@ -146,32 +139,35 @@ def mainloop():
   
             }
         )
+        Thread.setDaemon(True)
         Thread.start()
-        log.logger.debug(_("A new thread %s has started.") % thread_name)
-        
+
+
+def stopsocket():
+    '''socket终止'''
+    globals()['sock_condition'] = False
+    with open("config.toml", "rb") as f:
+        config = tomllib.load(f)
+    clientsocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    host, port= 'localhost',config["connect"]["port"]
+    clientsocket.connect((host,port))
+    clientsocket.close()
+    sys.exit()
+
+
+def consoled():
+    '''控制台
+    若要添加控制台指令,在字典command_dict中添加即可'''
+    log.logger.info("Command example: [command]; ")
     while True:
-        threadingnum_max = 10000
-        threadings,threadnum = [],None
-        conn, addr = server.accept()  # 等待连接,多个连接的时候就会出现问题,其实返回了两个值
-        log.logger.info(_("New connection: %s") % str(addr))
-        while (threadnum in threadings or threadnum == None) and len(threadings) <=threadingnum_max:
-            threadnum = random.randint(1, threadingnum_max+1)
-        threadings.append(threadnum)
-        if len(threadings) >threadingnum_max:
-            print(f"The maximum number({threadingnum_max}) of connections is reached!")
-            del(threadings[-1])
-            threadnum = None
-        else:        
-            threadName = f"Thread-{threadnum}"
-            Thread = threading.Thread(
-                target=ConnHandlerObject, args=threadName, **{'root_dir':current_dir, \
-                    'rsa_keys': (ekey, fkey),'config': config, 'conn': conn, 'addr': addr}
-            )
-            Thread.start()
-            log.logger.debug(f"A new thread {threadName} has started.")
-            Thread.join()
-            info = threadings.pop(threadnum)
-            log.logger.info(f"The user({info}) disconnected")
+        try:
+            i = input(">")
+        except (EOFError,UnboundLocalError):pass
+        if i.endswith(";"):
+            command_dict = {"q;":stopsocket,}
+            command_dict[str(i)]()
+                
+            
 
 # 获取初始绝对路径
 # 结果最后不带斜杠，需要手动添加
@@ -180,17 +176,25 @@ root_abspath = os.path.dirname(os.path.abspath(__file__))
 print(root_abspath)
 ## 开始执行初始化过程
 
-log = logtool.LogClass(logname="main", filepath=''.join((root_abspath, '/main.log')))
+log = logtool.log(logname="main", filepath=''.join((root_abspath, '/main.log')))
 
-if __name__ == "__main__":
-    ### 如果被作为主程序运行，就开始面向前台的准备过程
+def main():
+    """ 如果被作为主程序运行，就开始面向前台的准备过程"""
+    #start
     # load toml
-    with open("config.toml", "rb") as f:
-        config = tomllib.load(f)
+    try:
+        with open("config.toml", "rb") as f:
+            config = tomllib.load(f)
+    except FileNotFoundError as error:
+        log.logger.fatal(f"{error}")
+        log.logger.fatal("Terminating program running!")
+        sys.exit()
     log.logger.debug(config)
 
-    starttime = time.time()
+    starttime = time.time() # 这里还有个endtime，但我懒得写了
+
     log.logger.info("Starting Classified File Management System - Server...")
+    # log.logger.info(f"Server time:{starttime}")    
     log.logger.info(f"Version {CORE_VERSION}")
     log.logger.info("Running On: Python %s" % sys.version)
     if sys.version_info[0] < 3: # 基于Python 3.11 开发，因此低于此版本就无法运行
@@ -199,7 +203,6 @@ if __name__ == "__main__":
         sys.exit()
 
     maindb = DB_Sqlite3(f"{root_abspath}/general.db")
-
     m_cur = maindb.conn.cursor()
 
     # 加载语言配置
@@ -217,31 +220,31 @@ if __name__ == "__main__":
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
-
     ipv4_addr = (config["connect"]["ipv4_addr"], config["connect"]["port"])
     ipv6_addr = (config["connect"]["ipv6_addr"], config["connect"]["port"])
-
     if config["connect"]["ipv4_enabled"]:
         server.bind(ipv4_addr)
         server.listen(0)
     if config["connect"]["ipv6_enabled"]:
         server.bind(ipv6_addr)
         server.listen(0)
-    
-    if config["connect"]["ipv4_enabled"]:
-        log.logger.info(_(f"IPv4 Address: {ipv4_addr}"))
-    else:
-        log.logger.info(_("IPv4 is not supported."))
-    if config["connect"]["ipv6_enabled"]:
-        log.logger.info(_(f"IPv6 Address: {ipv6_addr}"))
-    else:
-        log.logger.info(_("IPv6 is not supported."))
-    
 
+    if config["connect"]["ipv4_enabled"]:
+        log.logger.info((f"IPv4 Address: {ipv4_addr}"))
+    else:
+        log.logger.info(("IPv4 is not supported."))
+    if config["connect"]["ipv6_enabled"]:
+        log.logger.info((f"IPv6 Address: {ipv6_addr}"))
+    else:
+        log.logger.info(("IPv6 is not supported."))
     try:
-        mainloop()
-    except KeyboardInterrupt:
-        print("bye")
+        mainloopThread = threading.Thread(target=lambda:mainloop(server),name="mainloop")
+        mainloopThread.start()
+        consoledThread = threading.Thread(target=consoled,name="consoled")
+        consoledThread.start()
     finally:
         maindb.close()
         sys.exit()
+        
+if __name__ == "__main__":
+    main()
