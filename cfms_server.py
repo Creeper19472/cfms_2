@@ -123,21 +123,12 @@ def dbInit(db_object):
 sock_condition =True
 def mainloop(serverd):
     while sock_condition:
-        """建立客户端连接"""
-        
-
-        created_count += 1
-
-        actives = threading.enumerate()
-
-        thread_name = f"Thread-{created_count}"
-
-
+        """建立客户端连接"""   
         conn, addr = serverd.accept()
         keepalive = (1,60*1000,60*1000)
         conn.setsockopt(socket.SOL_SOCKET,socket.SO_KEEPALIVE, True)#开启TCP保活
         conn.ioctl(socket.SIO_KEEPALIVE_VALS,keepalive)      
-        log.logger.info(f"connection address: {addr!s}")
+        log.logger.info(f"conneaction address: {addr!s}")
         Thread = ConnThreads(
             target=ConnHandler, name=thread_name, args=(), kwargs={
                 "conn": conn,
@@ -187,9 +178,9 @@ print(root_abspath)
 
 log = logtool.log(logname="main", filepath=''.join((root_abspath, '/main.log')))
 
-if __name__ == "__main__":
-    # 如果被作为主程序运行，就开始面向前台的准备过程
-
+def main():
+    """ 如果被作为主程序运行，就开始面向前台的准备过程"""
+    #start
     # load toml
     try:
         with open("config.toml", "rb") as f:
@@ -254,3 +245,6 @@ if __name__ == "__main__":
     finally:
         maindb.close()
         sys.exit()
+        
+if __name__ == "__main__":
+    main()
