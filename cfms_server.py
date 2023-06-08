@@ -32,17 +32,6 @@ class DB_Sqlite3(object):
     def close(self):
         self.conn.close()
 
-
-
-
-if __name__ == "__main__":
-    HOST, PORT = "localhost", 9990
-
-    # Create the server, binding to localhost on port 9999
-    server = socketserver.ThreadingTCPServer((HOST, PORT), MyTCPHandler)    #实例化一个多线程TCPServer
-    print('Wait client . . .')
-    server.serve_forever()
-
 def dbInit(db_object):
     cur = db_object.conn.cursor()
     cur.execute("CREATE TABLE users(username TEXT, hash TEXT, salt TEXT, rights BLOB, groups BLOB)")
@@ -107,7 +96,7 @@ def dbInit(db_object):
 
     # 生成一对长度为 2048 位的 RSA 秘钥对, 使用默认的随机数生成函数,
     # 也可以手动指定一个随机数生成函数: randfunc=Crypto.Random.new().read
-    rsa_key = RSA.generate(2048)
+    rsa_key = RSA.generate(4096)
     print(rsa_key)                      # Private RSA key at 0x7FB241173748
     print(type(rsa_key))                # <class 'Crypto.PublicKey.RSA.RsaKey'>
 
@@ -154,6 +143,7 @@ def mainloop():
                 "db_conn": maindb.conn,
                 "toml_config": config,
                 "root_abspath": root_abspath
+  
             }
         )
         Thread.start()

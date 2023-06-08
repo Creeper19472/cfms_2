@@ -1,4 +1,5 @@
 # connThread.py
+
 import threading
 import time
 import gettext
@@ -7,6 +8,9 @@ import json
 
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
+
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
 
 class ConnThreads(threading.Thread):
     def __init__(self, target, name, args=(), kwargs={}):
@@ -18,8 +22,8 @@ class ConnThreads(threading.Thread):
         self.kwargs = kwargs
 
     def run(self):
-        target_class = self.target(*self.args, **self.kwargs)
-        target_class.thread_name = self.name
+        target_class = self.target(self.name, *self.args, **self.kwargs)
+
         try:
             target_class.main()
         except Exception as e:
@@ -27,14 +31,13 @@ class ConnThreads(threading.Thread):
             raise
 
 class ConnHandler():
-    def __init__(self, *args, **kwargs): #!!注意，self.thread_name 在调用类定义！
+    def __init__(self, thread_name, *args, **kwargs): #!!注意，self.thread_name 在调用类定义！
         self.args = args
         self.kwargs = kwargs
+        self.thread_name = thread_name
 
         self.conn = kwargs["conn"]
         self.addr = kwargs["addr"]
-
-        self.rsa_ekey, self.rsa_fkey = kwargs['rsa_keys']
 
         self.config = kwargs["toml_config"] # 导入配置字典
 
@@ -62,11 +65,15 @@ class ConnHandler():
 
 
     def __send(self, msg):
+        self.log.logger.debug(f"raw message to send: {msg}")
+        msg_to_send = msg.encode()
         if self.encrypted_connection:
-            pass
-        pass
+            encrypted_data = self.aes_cipher.encrypt(pad(msg_to_send, AES.block_size))
+            self.conn.sendall(encrypted_data)
+        else:
+            self.conn.sendall(msg_to_send)
 
-    def __recv(self, msg):
+    def __recv(self):
         total_data = bytes()
         while True:
             # 将收到的数据拼接起来
@@ -74,27 +81,40 @@ class ConnHandler():
             total_data += data
             if len(data) < self.BUFFER_SIZE:
                 break
-        return total_data
+        if self.encrypted_connection:
+            decrypted_data = self.aes_cipher.decrypt(total_data)
+            decoded = decrypted_data.decode()
+        else:
+            decoded = total_data.decode()
+        self.log.logger.debug(f"received decoded message: {decoded}")
+        return decoded
 
     def _doFirstCommunication(self, conn):
         receive = self.__recv()
         if receive == "hello":
-            conn.send("hello")
+            self.__send("hello")
         else:
-            conn.send("Unknown request")
+            print(receive)
+            self.__send("Unknown request")
             return False
         
-        conn.send(json.dumps({
+        if self.__recv() != "enableEncryption":
+             self.__send("Unknown request")
+             return False
+        
+        self.__send(json.dumps({
             "msg": "enableEncryption",
-            "public_key": self.public_key,
+            "public_key": self.public_key.export_key("PEM").decode(),
             "code": 0
         }))
 
-        receive_encrypted = conn.recv(self.BUFFER_SIZE)
+        receive_encrypted = conn.recv(self.BUFFER_SIZE) # 这里还不能用 self.__recv() 方法：是加密的
 
-        decrypted_data = self.pri_cipher.decrypt(receive_encrypted)
+        decrypted_data = self.pri_cipher.decrypt(receive_encrypted) # 得到AES密钥
 
-        print(decrypted_data.decode())
+        self.aes_cipher = AES.new(decrypted_data, AES.MODE_CBC)
+        self.encrypted_connection = True
+        
         return True
 
     def main(self):
@@ -106,10 +126,12 @@ class ConnHandler():
         if not self._doFirstCommunication(conn):
             conn.close()
             sys.exit()
+        else:
+            self.__send("done")
 
         while True:
             recv = self.conn.recv(self.BUFFER_SIZE)
-            conn.send("hello")
+            self.__send("hello")
             break
 
 if __name__ == "__main__":

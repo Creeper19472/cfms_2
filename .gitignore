@@ -1,2 +1,7 @@
 general.db
 main.log
+*.pyc
+*.pem
+__pycache__
+include/__pycache__/connThread.cpython-311.pyc
+include/__pycache__/logtool.cpython-311.pyc
