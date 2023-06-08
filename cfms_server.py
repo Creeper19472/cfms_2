@@ -122,6 +122,8 @@ def dbInit(db_object):
 
 sock_condition =True
 def mainloop(serverd):
+    created_count = 0
+
     while sock_condition:
         """建立客户端连接"""
         
@@ -148,7 +150,7 @@ def mainloop(serverd):
   
             }
         )
-        Thread.setDaemon(True)
+        Thread.daemon = True
         Thread.start()
 
 
@@ -185,7 +187,7 @@ root_abspath = os.path.dirname(os.path.abspath(__file__))
 print(root_abspath)
 ## 开始执行初始化过程
 
-log = logtool.log(logname="main", filepath=''.join((root_abspath, '/main.log')))
+log = logtool.LogClass(logname="main", filepath=''.join((root_abspath, '/main.log')))
 
 if __name__ == "__main__":
     # 如果被作为主程序运行，就开始面向前台的准备过程
