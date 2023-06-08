@@ -7,6 +7,7 @@ CORE_VERSION = "1.0.0.230607_alpha"
 import sys, os, json, socket, sqlite3, gettext, time, random, threading
 import tomllib
 import hashlib
+import socketserver # 准备切到 socketserver
 import include
 import include.logtool as logtool
 from include.connThread import * 
@@ -92,7 +93,7 @@ def dbInit(db_object):
 
     # 生成一对长度为 2048 位的 RSA 秘钥对, 使用默认的随机数生成函数,
     # 也可以手动指定一个随机数生成函数: randfunc=Crypto.Random.new().read
-    rsa_key = RSA.generate(2048)
+    rsa_key = RSA.generate(4096)
     print(rsa_key)                      # Private RSA key at 0x7FB241173748
     print(type(rsa_key))                # <class 'Crypto.PublicKey.RSA.RsaKey'>
 
@@ -135,6 +136,7 @@ def mainloop(serverd):
                 "db_conn": maindb.conn,
                 "toml_config": config,
                 "root_abspath": root_abspath
+  
             }
         )
         Thread.setDaemon(True)
