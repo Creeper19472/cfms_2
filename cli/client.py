@@ -1,7 +1,7 @@
 import socket
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
-import base64
+import hashlib
 
 import json
 import time
@@ -9,35 +9,50 @@ import os, sys
 
 class ClientConn:
 
-    def __init__(self, *args, **kwargs): #!!注意，self.thread_name 在调用类定义！
-        self.args = args
+    def __init__(self, client, **kwargs): #!!注意，self.thread_name 在调用类定义！
+
         self.kwargs = kwargs
         
-        self.client = kwargs["client"]
-
-        self.config = kwargs["toml_config"] # 导入配置字典
-
-        self.locale = self.config['general']['locale']
-        self.root_abspath = kwargs["root_abspath"]
-
-        sys.path.append(f"{self.root_abspath}/include/") # 增加导入位置
+        self.client = client
 
         self.BUFFER_SIZE = 1024
 
-        self.encrypted_connection = False
+        self.encrypted_connection = True
 
-        self.aes_cipher = None
+        self.aes_key = None
 
-    def __send(self, msg): # 不内置 json.dumps(): some objects are not hashable
-        self.log.logger.debug(f"raw message to send: {msg}")
+    def aes_encrypt(self, plain_text, key):
+
+        cipher = AES.new(key, AES.MODE_CBC) # 使用CBC模式
+
+        encrypted_text = cipher.encrypt(pad(plain_text.encode(), AES.block_size))
+
+        iv = cipher.iv
+
+        return iv + encrypted_text
+
+    # 解密
+
+    def aes_decrypt(self , encrypted_text, key):
+
+        iv = encrypted_text[:16]
+
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+
+        decrypted_text = unpad(cipher.decrypt(encrypted_text[16:]), AES.block_size)
+
+        return decrypted_text.decode()
+
+    def send(self, msg): # 不内置 json.dumps(): some objects are not hashable
+        # self.log.logger.debug(f"raw message to send: {msg}")
         msg_to_send = msg.encode()
         if self.encrypted_connection:
-            encrypted_data = self.aes_cipher.encrypt(pad(msg_to_send, AES.block_size))
+            encrypted_data = self.aes_encrypt(msg, self.aes_key) # aes_encrypt() 接受文本
             self.client.sendall(encrypted_data)
         else:
             self.client.sendall(msg_to_send)
 
-    def __recv(self):
+    def recv(self):
         total_data = bytes()
         while True:
             # 将收到的数据拼接起来
@@ -46,11 +61,10 @@ class ClientConn:
             if len(data) < self.BUFFER_SIZE:
                 break
         if self.encrypted_connection:
-            decrypted_data = self.aes_cipher.decrypt(total_data)
-            decoded = decrypted_data.decode()
+            decoded = self.aes_decrypt(total_data, self.aes_key)
         else:
             decoded = total_data.decode()
-        self.log.logger.debug(f"received decoded message: {decoded}")
+        # self.log.logger.debug(f"received decoded message: {decoded}")
         return decoded
 
 def aes_encrypt(plain_text, key):
@@ -142,8 +156,40 @@ print(json.loads(response))
 if (loaded_response := json.loads(response))["code"] == 0:
     print("success")
 
+# 初始化对象 ClientConn
+object_conn = ClientConn(client)
+object_conn.aes_key = data_key
+
+raw_passwd = "123456"
+sha256_obj = hashlib.sha256()
+sha256_obj.update(raw_passwd.encode())
+
+request_data = {
+    "request": "login",
+    "data": {
+        "username": "admin",
+        "password": f"{sha256_obj.hexdigest()}"
+        },
+    "token": ""
+}
+
+"""
+request 必须包含的要素：
+
+request: 请求的命令。
+data: 包含请求所需的数据。
+token: 登录时可不填；用于执行各项操作。
+若未登录应留空。
+"""
+
+object_conn.send(json.dumps(request_data))
+received = object_conn.recv()
+print("Received: {}".format(json.loads(received)))
+
+while True:
+    time.sleep(1)
+    object_conn.send("hello")
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
 sys.exit()
-# print("Received: {}".format(response))
-
-
-# client.sendall()

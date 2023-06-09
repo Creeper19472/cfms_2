@@ -49,9 +49,10 @@ def dbInit(db_object):
         return salt
 
     def create_sha256(pwd, salt):
-        sha256_obj = hashlib.sha256()
-        sha256_obj.update((pwd + salt).encode())
-        return sha256_obj.hexdigest()
+        first = hashlib.sha256(pwd.encode()).hexdigest()
+        second_obj = hashlib.sha256()
+        second_obj.update((first+salt).encode())
+        return second_obj.hexdigest()
 
     # 原始密码
     pwd = '123456'
@@ -215,6 +216,8 @@ if __name__ == "__main__":
 
     maindb = DB_Sqlite3(f"{root_abspath}/general.db")
     m_cur = maindb.conn.cursor()
+
+    print(type(maindb.conn))
 
     # 加载语言配置
     language = config["general"]["locale"]

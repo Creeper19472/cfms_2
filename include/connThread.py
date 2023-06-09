@@ -13,6 +13,9 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
 import base64
+import sqlite3
+
+from include.bulitin_class.users import Users
 
 class ConnThreads(threading.Thread):
     def __init__(self, target, name, args=(), kwargs={}):
@@ -34,6 +37,8 @@ class ConnThreads(threading.Thread):
 
 class ConnHandler():
     def __init__(self, thread_name, *args, **kwargs): #!!注意，self.thread_name 在调用类定义！
+        self.root_abspath = kwargs["root_abspath"]
+
         self.args = args
         self.kwargs = kwargs
         self.thread_name = thread_name
@@ -41,15 +46,20 @@ class ConnHandler():
         self.conn = kwargs["conn"]
         self.addr = kwargs["addr"]
 
+        self.db_conn = sqlite3.connect(f"{self.root_abspath}/general.db")
+
         self.config = kwargs["toml_config"] # 导入配置字典
 
         self.locale = self.config['general']['locale']
-        self.root_abspath = kwargs["root_abspath"]
+        
 
         sys.path.append(f"{self.root_abspath}/include/") # 增加导入位置
+        # sys.path.append(f"{self.root_abspath}/include/class")
 
         from logtool import LogClass
         self.log = LogClass(logname=f"main.connHandler.{self.thread_name}", filepath=f'{self.root_abspath}/main.log')
+
+        # from bulitin_class.users import Users
 
         self.BUFFER_SIZE = 1024
 
@@ -114,6 +124,9 @@ class ConnHandler():
         self.log.logger.debug(f"received decoded message: {decoded}")
         return decoded
 
+    def construct_package():
+        pass
+
     def _doFirstCommunication(self, conn):
         receive = self.__recv()
         if receive == "hello":
@@ -175,7 +188,55 @@ class ConnHandler():
                 print("Connection closed")
                 sys.exit()
 
-            print(f"recv: {recv}")
+            # print(f"recv: {recv}")
+            
+            self.handle(recv)
+
+    def handle(self, recv):
+        self.log.logger.debug("handle() 函数被调用")
+        if recv == "hello":
+            self.__send("hello")
+        elif (loaded_recv:=json.loads(recv))["request"] == "login":
+            try:
+                req_username = loaded_recv["data"].get("username", "")
+                req_password = loaded_recv["data"].get("password", "")
+                if (not req_username) or (not req_password):
+                    raise ValueError
+            except KeyError:
+                self.log.logger.debug("提交的请求没有提供 data 键值")
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild arguments"
+                }))
+                return
+            except ValueError:
+                self.log.logger.debug("提交的请求没有提供 data 键值")
+                self.__send(json.dumps({
+                    "code": -2,
+                    "msg": "no username or password provided"
+                }))
+                return
+            
+            self.log.logger.debug(f"收到登录请求，用户名：{req_username}，密码哈希：{req_password}")
+
+            # 初始化用户对象 User()
+            user = Users(req_username, self.db_conn)
+            if user.ifExists():
+                if user.ifMatchPassword(req_password): # actually hash
+                    self.log.logger.info(f"{req_username} 密码正确，准予访问")
+                    user.load() # 载入用户信息
+                    self.__send(json.dumps({
+                        "code": 0
+                    })
+                    )
+
+                else:
+                    self.log.logger.info(f"{req_username} 密码错误，拒绝访问")
+
+                
+
+
+        
             
 
 if __name__ == "__main__":
