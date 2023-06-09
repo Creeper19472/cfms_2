@@ -10,7 +10,9 @@ from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 
 from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad
+from Crypto.Util.Padding import pad, unpad
+
+import base64
 
 class ConnThreads(threading.Thread):
     def __init__(self, target, name, args=(), kwargs={}):
@@ -52,7 +54,9 @@ class ConnHandler():
         self.BUFFER_SIZE = 1024
 
         self.encrypted_connection = False
+
         self.__initRSA()
+        self.aes_key = None
         
     def __initRSA(self):
         with open(f"{self.root_abspath}/content/pri.pem", "rb") as pri_file:
@@ -63,12 +67,34 @@ class ConnHandler():
             self.public_key = RSA.import_key(pub_file.read())
         self.pub_cipher = PKCS1_OAEP.new(self.public_key)
 
+    def aes_encrypt(self, plain_text, key):
 
-    def __send(self, msg):
+        cipher = AES.new(key, AES.MODE_CBC) # 使用CBC模式
+
+        encrypted_text = cipher.encrypt(pad(plain_text.encode(), AES.block_size))
+
+        iv = cipher.iv
+
+        return iv + encrypted_text
+
+    # 解密
+
+    def aes_decrypt(self, encrypted_text, key):
+
+        iv = encrypted_text[:16]
+
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+
+        decrypted_text = unpad(cipher.decrypt(encrypted_text[16:]), AES.block_size)
+
+        return decrypted_text.decode()
+
+
+    def __send(self, msg): # 不内置 json.dumps(): some objects are not hashable
         self.log.logger.debug(f"raw message to send: {msg}")
         msg_to_send = msg.encode()
         if self.encrypted_connection:
-            encrypted_data = self.aes_cipher.encrypt(pad(msg_to_send, AES.block_size))
+            encrypted_data = self.aes_encrypt(msg, self.aes_key) # aes_encrypt() 接受文本
             self.conn.sendall(encrypted_data)
         else:
             self.conn.sendall(msg_to_send)
@@ -82,8 +108,7 @@ class ConnHandler():
             if len(data) < self.BUFFER_SIZE:
                 break
         if self.encrypted_connection:
-            decrypted_data = self.aes_cipher.decrypt(total_data)
-            decoded = decrypted_data.decode()
+            decoded = self.aes_decrypt(total_data, self.aes_key)
         else:
             decoded = total_data.decode()
         self.log.logger.debug(f"received decoded message: {decoded}")
@@ -108,12 +133,15 @@ class ConnHandler():
             "code": 0
         }))
 
-        receive_encrypted = conn.recv(self.BUFFER_SIZE) # 这里还不能用 self.__recv() 方法：是加密的
+        receive_encrypted = conn.recv(self.BUFFER_SIZE) # 这里还不能用 self.__recv() 方法：是加密的, 无法decode()
 
         decrypted_data = self.pri_cipher.decrypt(receive_encrypted) # 得到AES密钥
 
-        self.aes_cipher = AES.new(decrypted_data, AES.MODE_CBC)
-        self.encrypted_connection = True
+        print(f"key: {decrypted_data}")
+
+        self.aes_key = decrypted_data
+        
+        self.encrypted_connection = True # 激活加密传输标识
         
         return True
 
@@ -127,12 +155,28 @@ class ConnHandler():
             conn.close()
             sys.exit()
         else:
-            self.__send("done")
+            self.__send(json.dumps(
+                {
+                    "msg": "ok",
+                    "code": 0
+                }
+            )) # 发送成功回答
 
         while True:
-            recv = self.conn.recv(self.BUFFER_SIZE)
-            self.__send("hello")
-            break
+            try:
+                recv = self.__recv()
+            except ValueError: # Wrong IV, etc.
+                try:
+                    self.__send("?")
+                except:
+                    raise
+                continue
+            except ConnectionAbortedError or ConnectionResetError:
+                print("Connection closed")
+                sys.exit()
+
+            print(f"recv: {recv}")
+            
 
 if __name__ == "__main__":
     Thread = ConnThreads(

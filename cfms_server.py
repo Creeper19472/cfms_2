@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = "1.0.0.230607_alpha"
+CORE_VERSION = "1.0.0.230609_alpha"
 
 # import importlib
 
@@ -120,13 +120,13 @@ def dbInit(db_object):
     with open("content/pri.pem", "wb") as pri_fp:
         pri_fp.write(pri_key)
 
-sock_condition =True
+sock_condition = True
+
 def mainloop(serverd):
     created_count = 0
 
     while sock_condition:
-        """建立客户端连接"""
-        
+        # 建立客户端连接
 
         created_count += 1
 
@@ -134,12 +134,13 @@ def mainloop(serverd):
 
         thread_name = f"Thread-{created_count}"
 
-
         conn, addr = serverd.accept()
         keepalive = (1,60*1000,60*1000)
-        conn.setsockopt(socket.SOL_SOCKET,socket.SO_KEEPALIVE, True)#开启TCP保活
+        conn.setsockopt(socket.SOL_SOCKET,socket.SO_KEEPALIVE, True) # 开启TCP保活
         conn.ioctl(socket.SIO_KEEPALIVE_VALS,keepalive)      
+        
         log.logger.info(f"connection address: {addr!s}")
+        
         Thread = ConnThreads(
             target=ConnHandler, name=thread_name, args=(), kwargs={
                 "conn": conn,
@@ -147,7 +148,6 @@ def mainloop(serverd):
                 "db_conn": maindb.conn,
                 "toml_config": config,
                 "root_abspath": root_abspath
-  
             }
         )
         Thread.daemon = True
@@ -155,7 +155,7 @@ def mainloop(serverd):
 
 
 def stopsocket():
-    '''socket终止'''
+    # socket终止
     globals()['sock_condition'] = False
     with open("config.toml", "rb") as f:
         config = tomllib.load(f)
@@ -175,7 +175,7 @@ def consoled():
             i = input(">")
         except (EOFError,UnboundLocalError):pass
         if i.endswith(";"):
-            command_dict = {"q;":stopsocket,}
+            command_dict = {"exit;":stopsocket,}
             command_dict[str(i)]()
                 
             
@@ -218,7 +218,7 @@ if __name__ == "__main__":
 
     # 加载语言配置
     language = config["general"]["locale"]
-    es = gettext.translation("main", localedir="./include/locale", languages=["zh_CN"], fallback=True)
+    es = gettext.translation("main", localedir="./include/locale", languages=[language], fallback=True)
     es.install()
 
     # 检查数据库存在性，没有就初始化
