@@ -69,11 +69,11 @@ class ConnHandler():
         self.aes_key = None
         
     def __initRSA(self):
-        with open(f"{self.root_abspath}/content/pri.pem", "rb") as pri_file:
+        with open(f"{self.root_abspath}/content/auth/pri.pem", "rb") as pri_file:
             self.private_key = RSA.import_key(pri_file.read())
         self.pri_cipher = PKCS1_OAEP.new(self.private_key)
 
-        with open(f"{self.root_abspath}/content/pub.pem", "rb") as pub_file:
+        with open(f"{self.root_abspath}/content/auth/pub.pem", "rb") as pub_file:
             self.public_key = RSA.import_key(pub_file.read())
         self.pub_cipher = PKCS1_OAEP.new(self.public_key)
 
@@ -210,28 +210,83 @@ class ConnHandler():
                 }))
                 return
             except ValueError:
-                self.log.logger.debug("提交的请求没有提供 data 键值")
+                self.log.logger.debug("提交的请求没有提供用户名或密码（可能 data 下对应键值为空）")
                 self.__send(json.dumps({
                     "code": -2,
                     "msg": "no username or password provided"
                 }))
                 return
             
-            self.log.logger.debug(f"收到登录请求，用户名：{req_username}，密码哈希：{req_password}")
+            self.log.logger.debug(f"收到登录请求，用户名：{req_username}，密码哈希：{req_password}") # 日志记录密码哈希其实是有泄露危险的
 
-            # 初始化用户对象 User()
-            user = Users(req_username, self.db_conn)
-            if user.ifExists():
-                if user.ifMatchPassword(req_password): # actually hash
-                    self.log.logger.info(f"{req_username} 密码正确，准予访问")
-                    user.load() # 载入用户信息
-                    self.__send(json.dumps({
-                        "code": 0
-                    })
-                    )
+            self.handle_login(req_username, req_password)
 
-                else:
-                    self.log.logger.info(f"{req_username} 密码错误，拒绝访问")
+        elif loaded_recv["request"] == "refreshToken":
+            self.log.logger.debug("收到客户端的 refreshToken 请求")
+            try:
+                req_username = loaded_recv["authentication"]["username"]
+                old_token = loaded_recv["authentication"]["token"]
+            except KeyError:
+                self.log.logger.debug("请求无效：认证数据不完整或缺失")
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "no full authentication data provided"
+                }))
+                return
+            self.handle_refreshToken(req_username, old_token)
+
+        elif loaded_recv["request"] == "disconnect":
+            self.__send("Goodbye")
+            self.conn.close()
+
+            self.log.logger.info("客户端断开连接")
+
+            sys.exit() # 退出线程
+
+
+            
+    def handle_login(self, req_username, req_password):
+        # 初始化用户对象 User()
+        user = Users(req_username, self.db_conn)
+        if user.ifExists():
+            if user.ifMatchPassword(req_password): # actually hash
+                self.log.logger.info(f"{req_username} 密码正确，准予访问")
+                user.load() # 载入用户信息
+
+                # 读取 token_secret
+                with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                    token_secret = ts_file.read()
+
+                self.__send(json.dumps({
+                    "code": 0,
+                    "token": user.generateUserToken(("all"), 3600, token_secret)
+                })
+                )
+
+            else:
+                self.log.logger.info(f"{req_username} 密码错误，拒绝访问")
+
+    def handle_refreshToken(self, req_username, old_token):
+        user = Users(req_username, self.db_conn) # 初始化用户对象
+        # 读取 token_secret
+        with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+            token_secret = ts_file.read()
+
+        if (new_token:=user.refreshUserToken(old_token, token_secret, vaild_time=3600)): # return: {token} , False
+            self.__send(json.dumps(
+                {
+                    "code": 0,
+                    "msg": "ok",
+                    "token": new_token 
+                }
+            ))
+        else:
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "invaild token or username"
+            }))
+
+
 
                 
 

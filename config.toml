@@ -13,5 +13,10 @@ ipv4_addr = "0.0.0.0"
 ipv6_addr = ""
 port = 5103
 
+[security]
+# 是否在每次启动时更新 token_secret ? 如果是，则重启服务后将导致所有 token 失效。
+# 不更新适合于服务器在异常下线后重新启动。
+update_token_secret_at_startup = true
+
 [database]
 db_name = "general.db"

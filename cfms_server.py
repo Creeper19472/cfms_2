@@ -13,6 +13,8 @@ import include.logtool as logtool
 from include.connThread import * 
 from Crypto.PublicKey import RSA
 
+import secrets
+
 class DB_Sqlite3(object):
     def __init__(self, filename):
         try:
@@ -115,10 +117,10 @@ def dbInit(db_object):
 
 
     # 把公钥和私钥保存到文件
-    with open("content/pub.pem", "wb") as pub_fp:
+    with open("content/auth/pub.pem", "wb") as pub_fp:
         pub_fp.write(pub_key)
 
-    with open("content/pri.pem", "wb") as pri_fp:
+    with open("content/auth/pri.pem", "wb") as pri_fp:
         pri_fp.write(pri_key)
 
 sock_condition = True
@@ -231,6 +233,13 @@ if __name__ == "__main__":
     m_cur.execute("select count(name) from sqlite_master where type='table' order by name;")
     if not m_cur.fetchone()[0]: # count 为0（False）时执行初始化
         dbInit(maindb)
+
+    # 初始化 token_secret
+    if config["security"]["update_token_secret_at_startup"]:
+        with open(f"{root_abspath}/content/auth/token_secret", "+a") as ts_file: # 这个文件的重要性和 pri.pem 是一样的
+            ts_file.truncate(0) # 清空
+            ts_file.write(secrets.token_hex(128))
+            
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)

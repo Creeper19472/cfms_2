@@ -171,7 +171,7 @@ request_data = {
         "password": f"{sha256_obj.hexdigest()}"
         },
     "token": ""
-}
+    }
 
 """
 request 必须包含的要素：
@@ -184,12 +184,37 @@ token: 登录时可不填；用于执行各项操作。
 
 object_conn.send(json.dumps(request_data))
 received = object_conn.recv()
-print("Received: {}".format(json.loads(received)))
+print("Received: {}".format(loaded:=json.loads(received)))
 
-while True:
+token = loaded["token"]
+# username = loaded["username"]
+
+count = 0
+while count < 20:
+    count += 1
+
     time.sleep(1)
     object_conn.send("hello")
     received = object_conn.recv()
     print("Received: {}".format(received))
+    object_conn.send(json.dumps(
+        {
+            "request": "refreshToken",
+            "authentication": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
+object_conn.send(json.dumps({
+    "request": "disconnect"
+}))
+received = object_conn.recv()
+print("Received: {}".format(received))
+
+object_conn.client.close()
 
 sys.exit()
