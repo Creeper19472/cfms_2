@@ -75,14 +75,23 @@ def dbInit(db_object):
 
     # 新建文档索引表
 
-    cur.execute("CREATE TABLE document_indexes(id TEXT, filename TEXT, abspath TEXT, owner TEXT, metadata BLOB)")
+    cur.execute("CREATE TABLE document_indexes(id TEXT, filename TEXT, abspath TEXT, owner TEXT, needed_rights BLOB, metadata BLOB)")
     # metadata = {
     # "require": ["read"],
     # "date": "YYMMDD"
     # }
     # 默认的abspath文件名为filename+id的md5
-    insert_doc = ("0", "hello.txt", root_abspath+"/content/hello.txt", "admin", json.dumps({}))
-    cur.execute("INSERT INTO document_indexes VALUES(?, ?, ?, ?, ?)", insert_doc)
+
+    insert_doc_requirements = [
+        {
+            "match": "all",
+            "rights": ["read", "read_5"],
+            "groups": None
+        }
+    ]
+
+    insert_doc = ("0", "hello.txt", root_abspath+"/content/hello.txt", "admin", json.dumps(insert_doc_requirements), json.dumps({}))
+    cur.execute("INSERT INTO document_indexes VALUES(?, ?, ?, ?, ?, ?)", insert_doc)
 
     # 新建组定义表
     cur.execute("CREATE TABLE groups(id TEXT, name TEXT, enabled INT, rights BLOB, metadata BLOB)")
@@ -112,8 +121,8 @@ def dbInit(db_object):
 
 
     # 转换为文本打印输出公钥和私钥
-    print(pub_key.decode())
-    print(pri_key.decode())
+    # print(pub_key.decode())
+    # print(pri_key.decode())
 
 
     # 把公钥和私钥保存到文件

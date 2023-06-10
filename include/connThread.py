@@ -16,6 +16,7 @@ import base64
 import sqlite3
 
 from include.bulitin_class.users import Users
+from include.bulitin_class.documents import Documents
 
 class ConnThreads(threading.Thread):
     def __init__(self, target, name, args=(), kwargs={}):
@@ -235,6 +236,36 @@ class ConnHandler():
                 return
             self.handle_refreshToken(req_username, old_token)
 
+        elif loaded_recv["request"] == "getDocument":
+            self.log.logger.debug("客户端请求调取文档")
+
+            try:
+                attached_token = loaded_recv["authentication"]["token"]
+                attached_username = loaded_recv["authentication"]["username"]
+            except KeyError:
+                self.log.logger.debug("请求无效：认证数据不完整或缺失")
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "no full authentication data provided"
+                }))
+                return
+            
+            # 验证 token
+            user = Users(attached_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(attached_token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
+
+            self.handle_getDocument(loaded_recv, attached_username, attached_token)
+
         elif loaded_recv["request"] == "disconnect":
             self.__send("Goodbye")
             self.conn.close()
@@ -285,6 +316,44 @@ class ConnHandler():
                 "code": -1,
                 "msg": "invaild token or username"
             }))
+
+    def handle_getDocument(self, recv: dict, req_username, req_token):
+        """
+        a vaild request:
+        {...
+            "data": {
+                "document_ID": "...",
+                "needed_data": {...}
+                }
+        }
+        """
+        try:
+            requested_document_id = recv["data"]["document_id"]
+            other_needed_data = recv["data"].get("needed_data", dict())
+        except KeyError:
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "bad request"
+            }))
+            return
+
+        
+        doc = Documents(requested_document_id, self.db_conn)
+        doc.load()
+
+        user = Users(req_username, self.db_conn)
+        if not user.ifExists():
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "user does not exists"
+            }))
+            return
+        
+        user.load()
+
+
+        if doc.if_exists:
+            doc.hasUserMetRequirements(user)
 
 
 
