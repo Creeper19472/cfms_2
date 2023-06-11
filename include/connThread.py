@@ -266,6 +266,36 @@ class ConnHandler():
 
             self.handle_getDocument(loaded_recv, attached_username, attached_token)
 
+        elif loaded_recv["request"] == "getDir":
+            try:
+                req_username = loaded_recv["authentication"]["username"]
+                token = loaded_recv["authentication"]["token"]
+            except KeyError:
+                self.log.logger.debug("请求无效：认证数据不完整或缺失")
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "no full authentication data provided"
+                }))
+                return
+            
+            # 验证 token
+            user = Users(req_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
+            
+            user.load()
+            
+            self.handle_getDir(loaded_recv, user)
+
         elif loaded_recv["request"] == "disconnect":
             self.__send("Goodbye")
             self.conn.close()
@@ -342,10 +372,10 @@ class ConnHandler():
         doc.load()
 
         user = Users(req_username, self.db_conn)
-        if not user.ifExists():
+        if not user.ifExists(): # 其实不必验证，但服务端签发时就要小心
             self.__send(json.dumps({
                 "code": -1,
-                "msg": "user does not exists"
+                "msg": "user does not exist"
             }))
             return
         
@@ -353,8 +383,77 @@ class ConnHandler():
 
 
         if doc.if_exists:
-            doc.hasUserMetRequirements(user)
+            if doc.hasUserMetRequirements(user):
+                self.__send(json.dumps({
+                    "code": 0,
+                    "msg": "developing"
+                }))
 
+    def handle_getDir(self, recv, user: object):
+        path_id = recv["data"].get("id")
+
+        if not path_id:
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "no path_id provided"
+            }))
+
+        prelist = []
+        prelist.append(path_id)
+
+        handle_cursor = self.db_conn.cursor()
+
+        handle_cursor.execute("SELECT type, needed_rights FROM path_structures WHERE id = ?" , tuple(prelist))
+
+        result = handle_cursor.fetchone()
+
+        if result:
+            tg_type = result[0]
+            needed_rights = json.loads(result[1])
+        else:
+            self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "no such file or directory"
+                }))
+            return
+        
+        del result
+        
+        if tg_type == "file":
+            self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "type file does not have a dir function"
+                }))
+            return
+        
+        elif tg_type == "dir":
+            if not user.hasRights(needed_rights["read"]):
+                self.__send(json.dumps({
+                    "code": 403,
+                    "msg": "permission denied"
+                }))
+                return
+
+            handle_cursor.execute("SELECT id, name, type FROM path_structures WHERE parent = ?" , tuple(prelist))
+            all_result = handle_cursor.fetchall()
+
+            dir_result = dict()
+
+            for i in all_result:
+                # print(i)
+                dir_result[i[0]] = (i[1], i[2])
+
+            self.__send(json.dumps({
+                "code": 0,
+                "dir_data": dir_result
+            }))
+
+        else:
+            self.log.logger.error(f"错误：数据库中 path_id 为 {path_id} 的条目的 type 为意料之外的值： {tg_type}")
+            self.__send(json.dumps({
+                "code": 500,
+                "msg": "internal server error"
+            }))
 
 
                 

@@ -209,6 +209,20 @@ while count < 20:
     received = object_conn.recv()
     print("Received: {}".format(received))
 
+    object_conn.send(json.dumps(
+        {
+            "request": "getDir",
+            "data": {"id": "dir0"},
+            "authentication": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
+
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
 object_conn.send(json.dumps({
     "request": "disconnect"
 }))

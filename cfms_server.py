@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = "1.0.0.230609_alpha"
+CORE_VERSION = "1.0.0.230611_alpha"
 
 # import importlib
 
@@ -85,7 +85,11 @@ def dbInit(db_object):
     insert_doc_requirements = [
         {
             "match": "all",
-            "rights": ["read", "read_5"],
+            "rights": {
+                "read": [],
+                "write": [],
+                "delete": []
+                       },
             "groups": None
         }
     ]
@@ -100,6 +104,18 @@ def dbInit(db_object):
         ("1", "user", 1, json.dumps(['read']), json.dumps({}))
     )
     cur.executemany("INSERT INTO groups VALUES(?, ?, ?, ?, ?)", insert_groups)
+
+    # 新建伪路径索引定义表
+    cur.execute("CREATE TABLE path_structures(id TEXT, name TEXT, parent TEXT, type TEXT, needed_rights BLOB, metadata BLOB)")
+    insert_paths = (
+        ("dir0", "demo_dir", "", "dir", json.dumps({
+            "read": [],
+            "write": []
+        }), json.dumps({})),
+        ("0", "hello.txt", "dir0", "file", json.dumps({}), json.dumps({})),
+        ("dir1", "hello_dir", "dir0", "dir", json.dumps({}), json.dumps({}))
+    )
+    cur.executemany("INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?)", insert_paths)
 
     db_object.conn.commit()
 

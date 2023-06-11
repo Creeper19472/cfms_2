@@ -123,3 +123,4 @@ if __name__ == "__main__":
     print(token)
     user_admin.load()
     print(user_admin.rights)
+    print(user_admin.groups)
