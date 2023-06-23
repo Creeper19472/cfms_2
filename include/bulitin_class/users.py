@@ -25,7 +25,9 @@ class Users(object):
         result = self.db_cursor.fetchone()
         
         self.rights = set(json.loads(result[0])) # 第一步
-        self.groups = set(json.loads(result[1]))
+        self.groups = set(json.loads(result[1])) # groups 没有其他来源
+
+        self.groups.add("user") # deafult and forced group
 
         for per_group in self.groups:
             # print(per_group)
@@ -97,7 +99,7 @@ class Users(object):
             return False
 
 
-    def hasRight(self, right=None):
+    def hasRight(self, right=None): # hasRights() is recommended
         if not right: # 若未给定权限名，则返回为真
             return True
         if right in self.rights:
@@ -112,6 +114,126 @@ class Users(object):
             if not i in self.rights:
                 return False
         return True
+    
+    def hasGroups(self, groups=[]):
+        if not groups:
+            return True
+        for i in groups:
+            if i == "user":
+                continue
+            if not i in self.groups:
+                return False
+        return True
+
+    def ifMatchRequirements(self, user: object, rules: list):
+
+
+        def matchRights(sub_rights_group):
+            if not sub_rights_group:
+                return True
+            
+            sub_match_mode = sub_rights_group.get("match", "all")
+            sub_rights_require = sub_rights_group.get("require", [])
+
+            if not sub_rights_require:
+                return True
+
+            if sub_match_mode == "all":
+                return user.hasRights(sub_rights_require)
+
+            elif sub_match_mode == "any":
+                
+                for right in sub_rights_require:
+                    if user.hasRight(right):
+                        return True
+                return False # fallback
+            else:
+                raise
+
+        def matchGroups(sub_groups_group):
+            if not sub_groups_group:
+                return True # if no content, return True
+
+            sub_match_mode = sub_groups_group.get("match", "all")
+            sub_groups_require = sub_groups_group.get("require", [])
+
+            if not sub_groups_require:
+                return True
+
+            if sub_match_mode == "all":
+                return user.hasGroups(sub_groups_require)
+
+            elif sub_match_mode == "any":
+                for group in sub_groups_require:
+
+                    if user.hasGroups((group,)):
+                        return True
+                
+                return False # fallback
+            else:
+                raise
+
+
+        def matchSubGroup(sub_group): # TODO #6 fix
+
+            sub_match_mode = sub_group.get("match", "all")
+
+            sub_rights_group = sub_group.get("rights", {})
+            sub_groups_group = sub_group.get("groups", {})
+
+            if not (sub_rights_group.get("require",[])) or (not sub_groups_group.get("require", [])):
+                sub_match_mode = "all"
+
+            if sub_match_mode == "any":
+
+                if matchRights(sub_rights_group) or matchGroups(sub_groups_group):
+                    return True
+                else:
+                    return False
+            if sub_match_mode == "all":
+                if matchRights(sub_rights_group) and matchGroups(sub_groups_group):
+                    return True
+                else:
+                    return False
+            else:
+                raise ValueError(r'the value of "match" must be "all" or "any"')
+            
+        def matchPrimarySubGroup(per_match_group):
+            match_mode = per_match_group.get("match", "all") # fallback: all
+            for sub_group in per_match_group["match_groups"]:
+                if not sub_group:
+                    continue
+
+                state = matchSubGroup(sub_group)
+                
+
+                if match_mode == "any":
+                    if state:
+                        return True
+                elif match_mode == "all":
+                    if not state:
+                        return False
+                    # TODO
+
+            if match_mode == "any":
+                return False
+            elif match_mode == "all":
+                return True 
+
+        for per_match_group in rules:
+            if not per_match_group: # quick judgement
+                continue # for case {}
+
+            if not matchPrimarySubGroup(per_match_group):
+                return False
+        
+        return True
+                    
+                    
+
+                    
+                
+
 
 if __name__ == "__main__":
     maindb = sqlite3.connect(f"B:\crp9472_personal\cfms_2/general.db")
@@ -122,5 +244,42 @@ if __name__ == "__main__":
     token = user_admin.generateUserToken(can_do, 3600 , "secret")
     print(token)
     user_admin.load()
-    print(user_admin.rights)
+    # print(user_admin.rights)
+    # print(user_admin.groups) # users 不显示
+    # print(user_admin.hasGroups(["user"]))
+
+    test_rules = [ # 列表，并列满足 与 条件
+        {
+            "match": "any",
+            "match_groups": [ # 下级匹配组，满足 any 条件 => True
+                {
+                    "match": "any",
+                    "rights": {
+                        "match": "any",
+                        "require": ["read"]
+                    },
+                    "groups": {
+                        "match": "any",
+                        "require": ["sysopa"]
+                    }
+                }
+            ]
+        }, 
+        {
+            "match": "all",
+            "match_groups": [
+                {
+                    "match": "any",
+                    "rights": {
+                        "match": "any",
+                        "require": ["root", "a"]
+                    }
+                }
+            ]
+        }, 
+    ]
+
+
+    # print(user_admin.hasGroups(["user", "sysop", "readers"]))
     print(user_admin.groups)
+    print(user_admin.ifMatchRequirements(user_admin, test_rules))

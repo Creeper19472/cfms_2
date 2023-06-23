@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = "1.0.0.230611_alpha"
+CORE_VERSION = "1.0.0.230623_alpha"
 
 # import importlib
 
@@ -84,13 +84,42 @@ def dbInit(db_object):
 
     insert_doc_requirements = [
         {
-            "match": "all",
-            "rights": {
-                "read": [],
-                "write": [],
-                "delete": []
-                       },
-            "groups": None
+            "read": # read 权限组要求
+                [ # 列表，并列满足 与 条件
+                    {
+                        "match": "any",
+                        "match_groups": [ # 下级匹配组，满足 any 条件 => True
+                            {
+                                "match": "any",
+                                "rights": {
+                                    "match": "any",
+                                    "require": ["read"]
+                                },
+                                "groups": {
+                                    "match": "any",
+                                    "require": ["user"]
+                                }
+                            }
+                        ]
+                    }, 
+                    {
+                        "match": "all",
+                        "match_groups": [
+                            {
+                                "match": "any",
+                                "rights": {
+                                    "match": "any",
+                                    "require": []
+                                },
+                                "groups": {
+                                    "match": "any",
+                                    "require": []
+                                }
+                            }
+                        ]
+                    }, 
+                ],
+            "write": {}
         }
     ]
 
