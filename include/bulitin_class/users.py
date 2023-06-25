@@ -125,7 +125,9 @@ class Users(object):
                 return False
         return True
 
-    def ifMatchRequirements(self, user: object, rules: list):
+    def ifMatchRequirements(self, rules: list):
+
+        user = self # alias
 
 
         def matchRights(sub_rights_group):
@@ -282,4 +284,4 @@ if __name__ == "__main__":
 
     # print(user_admin.hasGroups(["user", "sysop", "readers"]))
     print(user_admin.groups)
-    print(user_admin.ifMatchRequirements(user_admin, test_rules))
+    print(user_admin.ifMatchRequirements(test_rules))
