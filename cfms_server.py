@@ -4,6 +4,7 @@ CORE_VERSION = "1.0.0.230623_alpha"
 
 # import importlib
 
+import logging
 import sys, os, json, socket, sqlite3, gettext, time, random, threading
 import tomllib
 import hashlib
@@ -146,6 +147,10 @@ def dbInit(db_object):
     )
     cur.executemany("INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?)", insert_paths)
 
+    # create config table(internal)
+    cur.execute("CREATE TABLE cfms_internal(id TEXT, key TEXT, value BLOB)")
+    cur.execute("INSERT INTO cfms_internal VALUES(?, ?, ?)", (0, "db_version", CORE_VERSION))
+
     db_object.conn.commit()
 
     # 生成一对长度为 2048 位的 RSA 秘钥对, 使用默认的随机数生成函数,
@@ -257,6 +262,10 @@ if __name__ == "__main__":
         log.logger.fatal(f"{error}")
         log.logger.fatal("Terminating program running!")
         sys.exit()
+
+    if config["debug"]["debug"]:
+        log.cshandler.setLevel(logging.DEBUG)
+        log.logger.info("Debug mode enabled.")
     log.logger.debug(config)
 
     starttime = time.time() # 这里还有个endtime，但我懒得写了

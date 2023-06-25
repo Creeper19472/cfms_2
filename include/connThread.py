@@ -296,6 +296,11 @@ class ConnHandler():
             
             self.handle_getDir(loaded_recv, user)
 
+        elif loaded_recv["request"] == "getPolicy":
+            # TODO
+            
+            self.handle_getPolicy(loaded_recv)
+
         elif loaded_recv["request"] == "disconnect":
             self.__send("Goodbye")
             self.conn.close()
@@ -455,6 +460,8 @@ class ConnHandler():
                 "msg": "internal server error"
             }))
 
+    def handle_getPolicy(self, recv, user: object):
+        pass
 
                 
 

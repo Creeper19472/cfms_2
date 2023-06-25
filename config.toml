@@ -22,4 +22,4 @@ update_token_secret_at_startup = true
 db_name = "general.db"
 
 [debug]
-debug = false
+debug = true
