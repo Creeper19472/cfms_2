@@ -186,21 +186,42 @@ class ConnHandler():
                     raise
                 continue
             except ConnectionAbortedError or ConnectionResetError:
-                print("Connection closed")
+                self.log.logger.info("Connection closed")
                 sys.exit()
 
             # print(f"recv: {recv}")
-            
-            self.handle(recv)
 
-    def handle(self, recv):
-        self.log.logger.debug("handle() 函数被调用")
-        if recv == "hello":
-            self.__send("hello")
-        elif (loaded_recv:=json.loads(recv))["request"] == "login":
             try:
-                req_username = loaded_recv["data"].get("username", "")
-                req_password = loaded_recv["data"].get("password", "")
+                loaded_recv = json.loads(recv)
+            except:
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild request format"
+                }))
+                continue
+
+            # 判断 API 版本
+            if loaded_recv.get("version", None) == 1:
+                self.handle_v1(loaded_recv)
+            else: # 目前仅支持 V1
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "unsupported API version or not given"
+                }))
+                continue
+
+    def handle_v1(self, loaded_recv):
+
+        def verifyAccess(self):
+            pass
+
+
+        self.log.logger.debug("handle_v1() 函数被调用")
+
+        if loaded_recv["request"] == "login":
+            try:
+                req_username = loaded_recv["request"].get("username", "")
+                req_password = loaded_recv["request"].get("password", "")
                 if (not req_username) or (not req_password):
                     raise ValueError
             except KeyError:
@@ -222,61 +243,41 @@ class ConnHandler():
 
             self.handle_login(req_username, req_password)
 
-        elif loaded_recv["request"] == "refreshToken":
+            return # 如果不返回，那么下面的判断就会被执行了
+
+        
+        # 以下的所有请求都应该是需要鉴权的，如果不是请放在上面
+        # 如果需要与以下鉴权过程不同的鉴权请放在上面处理
+        # 上面部分的每个判断都应该有 return
+
+        ### 获取 auth 标头
+
+        try:
+            attached_token = loaded_recv["auth"]["token"]
+            attached_username = loaded_recv["auth"]["username"]
+        except KeyError:
+            self.log.logger.debug("请求无效：认证数据不完整或缺失")
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "no full authentication data provided"
+            }))
+            return
+
+        ### 结束
+
+        if loaded_recv["request"] == "refreshToken":
+
             self.log.logger.debug("收到客户端的 refreshToken 请求")
-            try:
-                req_username = loaded_recv["authentication"]["username"]
-                old_token = loaded_recv["authentication"]["token"]
-            except KeyError:
-                self.log.logger.debug("请求无效：认证数据不完整或缺失")
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "no full authentication data provided"
-                }))
-                return
-            self.handle_refreshToken(req_username, old_token)
 
+            self.handle_refreshToken(req_username, attached_token)
+        
         elif loaded_recv["request"] == "getDocument":
+
             self.log.logger.debug("客户端请求调取文档")
-
-            try:
-                attached_token = loaded_recv["authentication"]["token"]
-                attached_username = loaded_recv["authentication"]["username"]
-            except KeyError:
-                self.log.logger.debug("请求无效：认证数据不完整或缺失")
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "no full authentication data provided"
-                }))
-                return
-            
-            # 验证 token
-            user = Users(attached_username, self.db_conn)
-
-            # 读取 token_secret
-            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                token_secret = ts_file.read()
-
-            if not user.ifVaildToken(attached_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
-                return
 
             self.handle_getDocument(loaded_recv, attached_username, attached_token)
 
         elif loaded_recv["request"] == "getDir":
-            try:
-                req_username = loaded_recv["authentication"]["username"]
-                token = loaded_recv["authentication"]["token"]
-            except KeyError:
-                self.log.logger.debug("请求无效：认证数据不完整或缺失")
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "no full authentication data provided"
-                }))
-                return
             
             # 验证 token
             user = Users(req_username, self.db_conn)
@@ -285,7 +286,7 @@ class ConnHandler():
             with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
                 token_secret = ts_file.read()
 
-            if not user.ifVaildToken(token, token_secret):
+            if not user.ifVaildToken(attached_token, token_secret):
                 self.__send(json.dumps({
                     "code": -1,
                     "msg": "invaild token or username"
@@ -356,15 +357,15 @@ class ConnHandler():
         """
         a vaild request:
         {...
-            "data": {
-                "document_ID": "...",
-                "needed_data": {...}
+            "request": {
+                "document_id": "...",
+                "data": {}
                 }
         }
         """
         try:
-            requested_document_id = recv["data"]["document_id"]
-            other_needed_data = recv["data"].get("needed_data", dict())
+            requested_document_id = recv["request"]["document_id"]
+            other_needed_data = recv["request"].get("data", dict())
         except KeyError:
             self.__send(json.dumps({
                 "code": -1,
@@ -395,7 +396,7 @@ class ConnHandler():
                 }))
 
     def handle_getDir(self, recv, user: object):
-        path_id = recv["data"].get("id")
+        path_id = recv["request"].get("id")
 
         if not path_id:
             self.__send(json.dumps({
@@ -403,12 +404,9 @@ class ConnHandler():
                 "msg": "no path_id provided"
             }))
 
-        prelist = []
-        prelist.append(path_id)
-
         handle_cursor = self.db_conn.cursor()
 
-        handle_cursor.execute("SELECT type, needed_rights FROM path_structures WHERE id = ?" , tuple(prelist))
+        handle_cursor.execute("SELECT type, needed_rights FROM path_structures WHERE id = ?" , (path_id,))
 
         result = handle_cursor.fetchone()
 
@@ -439,7 +437,7 @@ class ConnHandler():
                 }))
                 return
 
-            handle_cursor.execute("SELECT id, name, type FROM path_structures WHERE parent = ?" , tuple(prelist))
+            handle_cursor.execute("SELECT id, name, type FROM path_structures WHERE parent = ?" , (path_id,))
             all_result = handle_cursor.fetchall()
 
             dir_result = dict()
@@ -460,8 +458,8 @@ class ConnHandler():
                 "msg": "internal server error"
             }))
 
-    def handle_getPolicy(self, recv, user: object):
-        pass
+    def handle_getPolicy(self, loaded_recv, user: object):
+        loaded_recv[""]
 
                 
 

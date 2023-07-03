@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = "1.0.0.230623_alpha"
+CORE_VERSION = "1.0.0.230628_alpha"
 
 # import importlib
 
@@ -68,84 +68,83 @@ def dbInit(db_object):
     print('[salt]\n', salt)
     print('[sha256]\n', sha256)
 
+    user_rights = {
+        "root": {
+            "expire": 0
+        }
+    }
+
+    user_groups = {
+        "sysop": {
+            "expire": 0
+        }
+    }
+
     insert_users = (
-        ("admin", sha256, salt, json.dumps(["root"]), json.dumps(["sysop"])),
-        ("guest", sha256, salt, json.dumps([]), json.dumps([]))
+        ("admin", sha256, salt, json.dumps(user_rights), json.dumps(user_groups)),
+        ("guest", sha256, salt, json.dumps({}), json.dumps({}))
     )
     cur.executemany("INSERT INTO users VALUES(?, ?, ?, ?, ?)", insert_users)
 
     # 新建文档索引表
-
-    cur.execute("CREATE TABLE document_indexes(id TEXT, filename TEXT, abspath TEXT, owner TEXT, needed_rights BLOB, metadata BLOB)")
+    
+    # now document_indexes does not store external data
+    cur.execute("CREATE TABLE document_indexes(id TEXT, abspath TEXT)") 
+    
     # metadata = {
     # "require": ["read"],
     # "date": "YYMMDD"
     # }
     # 默认的abspath文件名为filename+id的md5
 
-    insert_doc_requirements = [
-        {
-            "read": # read 权限组要求
-                [ # 列表，并列满足 与 条件
-                    {
-                        "match": "any",
-                        "match_groups": [ # 下级匹配组，满足 any 条件 => True
-                            {
-                                "match": "any",
-                                "rights": {
-                                    "match": "any",
-                                    "require": ["read"]
-                                },
-                                "groups": {
-                                    "match": "any",
-                                    "require": ["user"]
-                                }
-                            }
-                        ]
-                    }, 
-                    {
-                        "match": "all",
-                        "match_groups": [
-                            {
-                                "match": "any",
-                                "rights": {
-                                    "match": "any",
-                                    "require": []
-                                },
-                                "groups": {
-                                    "match": "any",
-                                    "require": []
-                                }
-                            }
-                        ]
-                    }, 
-                ],
-            "write": {}
-        }
-    ]
-
-    insert_doc = ("0", "hello.txt", root_abspath+"/content/hello.txt", "admin", json.dumps(insert_doc_requirements), json.dumps({}))
-    cur.execute("INSERT INTO document_indexes VALUES(?, ?, ?, ?, ?, ?)", insert_doc)
+    insert_doc = ("0", root_abspath+"/content/hello.txt") # 潜在问题：不能整体打包移动
+    cur.execute("INSERT INTO document_indexes VALUES(?, ?)", insert_doc)
 
     # 新建组定义表
-    cur.execute("CREATE TABLE groups(id TEXT, name TEXT, enabled INT, rights BLOB, metadata BLOB)")
+    cur.execute("CREATE TABLE groups(id TEXT, name TEXT, enabled INT, rights BLOB, properties BLOB)")
+
+    group_rights = {
+        "read": {
+            "expire": 0
+        }
+    }
+
     insert_groups = (
-        ("0", "sysop", 1, json.dumps([]), json.dumps({})),
-        ("1", "user", 1, json.dumps(['read']), json.dumps({}))
+        ("0", "sysop", 1, json.dumps(group_rights), json.dumps({})),
+        ("1", "user", 1, json.dumps(group_rights), json.dumps({}))
     )
     cur.executemany("INSERT INTO groups VALUES(?, ?, ?, ?, ?)", insert_groups)
 
     # 新建伪路径索引定义表
-    cur.execute("CREATE TABLE path_structures(id TEXT, name TEXT, parent TEXT, type TEXT, needed_rights BLOB, metadata BLOB)")
-    insert_paths = (
-        ("dir0", "demo_dir", "", "dir", json.dumps({
+    cur.execute("CREATE TABLE path_structures(id TEXT, name TEXT, parent_id TEXT, type TEXT, file_id TEXT, access_rules BLOB, external_access BLOB, properties BLOB)")
+    # file_id: 如果是文件就必须有；文件夹应该没有
+
+    insert_doc_access_rules = [
+        {
             "read": [],
             "write": []
-        }), json.dumps({})),
-        ("0", "hello.txt", "dir0", "file", json.dumps({}), json.dumps({})),
-        ("dir1", "hello_dir", "dir0", "dir", json.dumps({}), json.dumps({}))
+        }
+    ]
+
+    insert_doc_external_access = { # 这里的 access 下记录的是允许的操作而非权限，即：read, write, delete, permanently_delete, rename
+        "groups": {
+            "sysop": {
+                "read": {
+                    "expire": 0
+                },
+                "permanently_delete": {
+                    "expire": 0
+                }
+            }
+        },
+        "users": {}
+    }
+
+
+    insert_paths = (
+        ("C00001", "hello.txt", "", "file", "0", json.dumps(insert_doc_access_rules), json.dumps(insert_doc_external_access), json.dumps({})),
     )
-    cur.executemany("INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?)", insert_paths)
+    cur.executemany("INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?, ?, ?)", insert_paths)
 
     # create config table(internal)
     cur.execute("CREATE TABLE cfms_internal(id TEXT, key TEXT, value BLOB)")

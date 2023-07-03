@@ -231,6 +231,7 @@ class Users(object):
         
         return True
                     
+    ifMatchRules = ifMatchRequirements
                     
 
                     
@@ -284,4 +285,4 @@ if __name__ == "__main__":
 
     # print(user_admin.hasGroups(["user", "sysop", "readers"]))
     print(user_admin.groups)
-    print(user_admin.ifMatchRequirements(test_rules))
+    print(user_admin.ifMatchRules(test_rules))

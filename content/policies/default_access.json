@@ -1,0 +1,56 @@
+{
+    "on_root_directory": {
+        "access_rules": [
+            {
+                "read": [
+                    {
+                        "match": "all",
+                        "match_groups": [
+                            {
+                                "match": "all",
+                                "rights": {
+                                    "match": "all",
+                                    "require": ["read"]
+                                },
+                                "groups": {
+                                    "match": "all",
+                                    "require": ["user"]
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "write": [
+                    {
+                        "match": "all",
+                        "match_groups": [
+                            {
+                                "match": "all",
+                                "groups": {
+                                    "match": "all",
+                                    "require": ["sysop"]
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
+        "external_access": {
+            "groups": {
+                "sysop": {
+                    "read": {
+                        "expire": 0
+                    },
+                    "write": {
+                        "expire": 0
+                    },
+                    "permanently_delete": {
+                        "expire": 0
+                    }
+                }
+            },
+            "users": {}
+        }
+    }
+}
