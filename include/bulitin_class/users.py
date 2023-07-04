@@ -23,9 +23,19 @@ class Users(object):
 
         self.db_cursor.execute("SELECT rights, groups from users where username = ?", tuple(prelist))
         result = self.db_cursor.fetchone()
-        
-        self.rights = set(json.loads(result[0])) # 第一步
-        self.groups = set(json.loads(result[1])) # groups 没有其他来源
+
+        self.rights = set() # 重置
+        self.groups = set()
+
+        for i in (loaded_result := json.loads(result[0])):
+            if (not (expire_time:=loaded_result[i].get("expire", 0))) or (expire_time > time.time()):
+                self.rights.add(i)
+
+        for j in (loaded_result := json.loads(result[1])):
+             if (not (expire_time:=loaded_result[j].get("expire", 0))) or (expire_time > time.time()):
+                self.groups.add(j)
+
+        del loaded_result
 
         self.groups.add("user") # deafult and forced group
 
@@ -36,8 +46,9 @@ class Users(object):
             self.db_cursor.execute("SELECT rights, enabled from groups where name = ?", tuple(prelist))
             per_result = self.db_cursor.fetchone()
             if per_result[1]:
-                for i in json.loads(per_result[0]):
-                    self.rights.add(i)
+                for i in (per_group_rights := json.loads(per_result[0])):
+                    if (not (expire_time:=per_group_rights[i].get("expire", 0))) or (expire_time > time.time()):
+                        self.rights.add(i)
 
     def ifExists(self):
         # 可能注入的位点
@@ -119,8 +130,6 @@ class Users(object):
         if not groups:
             return True
         for i in groups:
-            if i == "user":
-                continue
             if not i in self.groups:
                 return False
         return True
@@ -263,7 +272,7 @@ if __name__ == "__main__":
                     },
                     "groups": {
                         "match": "any",
-                        "require": ["sysopa"]
+                        "require": ["sysop"]
                     }
                 }
             ]
@@ -285,4 +294,5 @@ if __name__ == "__main__":
 
     # print(user_admin.hasGroups(["user", "sysop", "readers"]))
     print(user_admin.groups)
+    print(user_admin.rights)
     print(user_admin.ifMatchRules(test_rules))

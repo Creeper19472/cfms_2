@@ -243,13 +243,13 @@ class ConnHandler():
         for i in external_access["groups"]:
             if action not in (i_dict:=external_access["groups"][i]).keys():
                 continue
-            if (expire_time:=i_dict[action]["expire"]) and (expire_time >= time.time()): # 如果用户组拥有的权限尚未到期
+            if (not (expire_time:=i_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户组拥有的权限尚未到期
                 if user.hasGroups((i,)): # 如果用户存在于此用户组
                     return True
                 
         if user.username in external_access["users"].keys(): # 如果用户在字典中有记录
             if action in (user_action_dict:=external_access["users"][user.username]).keys(): # 如果请求操作在用户的字典中有记录
-                if (expire_time:=user_action_dict[action]["expire"]) and (expire_time >= time.time()): # 如果用户拥有的权限尚未到期
+                if (not (expire_time:=user_action_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户拥有的权限尚未到期
                     return True
                 
         self.log.logger.debug("校验失败。")
