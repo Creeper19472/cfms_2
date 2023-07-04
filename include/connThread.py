@@ -151,7 +151,7 @@ class ConnHandler():
 
         decrypted_data = self.pri_cipher.decrypt(receive_encrypted) # 得到AES密钥
 
-        print(f"key: {decrypted_data}")
+        self.log.logger.debug(f"AES Key: {decrypted_data}")
 
         self.aes_key = decrypted_data
         
@@ -193,7 +193,8 @@ class ConnHandler():
 
             try:
                 loaded_recv = json.loads(recv)
-            except:
+            except Exception as e:
+                self.log.logger.debug(f"Error when loading recv: {e}")
                 self.__send(json.dumps({
                     "code": -1,
                     "msg": "invaild request format"
@@ -210,18 +211,58 @@ class ConnHandler():
                 }))
                 continue
 
+    def verifyUserAccess(self, id, action, user: Users):
+        """
+        用户鉴权函数。
+        用于逐级检查用户是否拥有访问权限，若发生任意无情况即返回 False
+        """
+        self.log.logger.debug(f"verifyUserAccess(): 正在对 用户 {user.username} 访问 id: {id} 的请求 进行鉴权")
+
+        db_cur = self.db_conn.cursor()
+        db_cur.execute("SELECT parent_id, access_rules, external_access FROM path_structures WHERE id = ?", (id,))
+
+        result = db_cur.fetchall()
+
+        assert len(result) == 1
+
+        if (parent:=result[0][0]):
+            self.log.logger.debug(f"正在检查其父目录 {parent} 的权限...")
+            if not self.verifyUserAccess(parent, action, user):
+                return False
+            self.log.logger.debug("完毕，无事发生。")
+            
+        access_rules = json.loads(result[0][1])
+        external_access = json.loads(result[0][2])
+
+        self.log.logger.debug(f"所有访问规则和附加权限记录：{access_rules}, {external_access}")
+
+        # access_rules 包括所有规则
+        if user.ifMatchRules(access_rules[action]):
+            return True
+        
+        for i in external_access["groups"]:
+            if action not in (i_dict:=external_access["groups"][i]).keys():
+                continue
+            if (expire_time:=i_dict[action]["expire"]) and (expire_time >= time.time()): # 如果用户组拥有的权限尚未到期
+                if user.hasGroups((i,)): # 如果用户存在于此用户组
+                    return True
+                
+        if user.username in external_access["users"].keys(): # 如果用户在字典中有记录
+            if action in (user_action_dict:=external_access["users"][user.username]).keys(): # 如果请求操作在用户的字典中有记录
+                if (expire_time:=user_action_dict[action]["expire"]) and (expire_time >= time.time()): # 如果用户拥有的权限尚未到期
+                    return True
+                
+        self.log.logger.debug("校验失败。")
+        return False
+
     def handle_v1(self, loaded_recv):
-
-        def verifyAccess(self):
-            pass
-
 
         self.log.logger.debug("handle_v1() 函数被调用")
 
         if loaded_recv["request"] == "login":
             try:
-                req_username = loaded_recv["request"].get("username", "")
-                req_password = loaded_recv["request"].get("password", "")
+                req_username = loaded_recv["data"].get("username", "")
+                req_password = loaded_recv["data"].get("password", "")
                 if (not req_username) or (not req_password):
                     raise ValueError
             except KeyError:
@@ -269,7 +310,7 @@ class ConnHandler():
 
             self.log.logger.debug("收到客户端的 refreshToken 请求")
 
-            self.handle_refreshToken(req_username, attached_token)
+            self.handle_refreshToken(attached_username, attached_token)
         
         elif loaded_recv["request"] == "getDocument":
 
@@ -280,7 +321,7 @@ class ConnHandler():
         elif loaded_recv["request"] == "getDir":
             
             # 验证 token
-            user = Users(req_username, self.db_conn)
+            user = Users(attached_username, self.db_conn)
 
             # 读取 token_secret
             with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
@@ -357,15 +398,14 @@ class ConnHandler():
         """
         a vaild request:
         {...
-            "request": {
-                "document_id": "...",
-                "data": {}
+            "data": {
+                "document_id": "..."
                 }
         }
         """
         try:
-            requested_document_id = recv["request"]["document_id"]
-            other_needed_data = recv["request"].get("data", dict())
+            requested_document_id = recv["data"]["document_id"]
+            other_needed_data = recv["data"].get("other_data", dict())
         except KeyError:
             self.__send(json.dumps({
                 "code": -1,
@@ -396,7 +436,7 @@ class ConnHandler():
                 }))
 
     def handle_getDir(self, recv, user: object):
-        path_id = recv["request"].get("id")
+        path_id = recv["data"].get("id")
 
         if not path_id:
             self.__send(json.dumps({
@@ -406,13 +446,13 @@ class ConnHandler():
 
         handle_cursor = self.db_conn.cursor()
 
-        handle_cursor.execute("SELECT type, needed_rights FROM path_structures WHERE id = ?" , (path_id,))
+        handle_cursor.execute("SELECT type, access_rules FROM path_structures WHERE id = ?" , (path_id,))
 
         result = handle_cursor.fetchone()
 
         if result:
             tg_type = result[0]
-            needed_rights = json.loads(result[1])
+            access_rules = json.loads(result[1])
         else:
             self.__send(json.dumps({
                     "code": -1,
@@ -425,26 +465,37 @@ class ConnHandler():
         if tg_type == "file":
             self.__send(json.dumps({
                     "code": -1,
-                    "msg": "type file does not have a dir function"
+                    "msg": "type 'file' does not have a dir function"
                 }))
             return
         
         elif tg_type == "dir":
-            if not user.hasRights(needed_rights["read"]):
+            if not self.verifyUserAccess(path_id, "read", user):
                 self.__send(json.dumps({
                     "code": 403,
                     "msg": "permission denied"
                 }))
+                self.log.logger.debug("权限校验失败：无权访问")
                 return
+            
 
-            handle_cursor.execute("SELECT id, name, type FROM path_structures WHERE parent = ?" , (path_id,))
+            handle_cursor.execute("SELECT id, name, type FROM path_structures WHERE parent_id = ?" , (path_id,))
             all_result = handle_cursor.fetchall()
 
             dir_result = dict()
 
             for i in all_result:
+
+                if not self.verifyUserAccess(i[0], "read", user): # 检查该目录下的文件是否有权访问，如无则隐藏
+                    if self.config["security"]["hide_when_no_access"]:
+                        continue
+                    else:
+                        pass
                 # print(i)
-                dir_result[i[0]] = (i[1], i[2])
+                dir_result[i[0]] = {
+                    "name": i[1],
+                    "type": i[2]
+                }
 
             self.__send(json.dumps({
                 "code": 0,

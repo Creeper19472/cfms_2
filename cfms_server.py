@@ -14,6 +14,8 @@ import include.logtool as logtool
 from include.connThread import * 
 from Crypto.PublicKey import RSA
 
+import include.filesrv.ftserver as ftserver
+
 import secrets
 
 class DB_Sqlite3(object):
@@ -119,12 +121,11 @@ def dbInit(db_object):
     cur.execute("CREATE TABLE path_structures(id TEXT, name TEXT, parent_id TEXT, type TEXT, file_id TEXT, access_rules BLOB, external_access BLOB, properties BLOB)")
     # file_id: 如果是文件就必须有；文件夹应该没有
 
-    insert_doc_access_rules = [
-        {
-            "read": [],
-            "write": []
-        }
-    ]
+    insert_doc_access_rules = {
+        "read": [],
+        "write": []
+    }
+    
 
     insert_doc_external_access = { # 这里的 access 下记录的是允许的操作而非权限，即：read, write, delete, permanently_delete, rename
         "groups": {
@@ -150,13 +151,14 @@ def dbInit(db_object):
     cur.execute("CREATE TABLE cfms_internal(id TEXT, key TEXT, value BLOB)")
     cur.execute("INSERT INTO cfms_internal VALUES(?, ?, ?)", (0, "db_version", CORE_VERSION))
 
+
     db_object.conn.commit()
 
     # 生成一对长度为 2048 位的 RSA 秘钥对, 使用默认的随机数生成函数,
     # 也可以手动指定一个随机数生成函数: randfunc=Crypto.Random.new().read
     rsa_key = RSA.generate(4096)
-    print(rsa_key)                      # Private RSA key at 0x7FB241173748
-    print(type(rsa_key))                # <class 'Crypto.PublicKey.RSA.RsaKey'>
+    # print(rsa_key)                      # Private RSA key at 0x7FB241173748
+    # print(type(rsa_key))                # <class 'Crypto.PublicKey.RSA.RsaKey'>
 
 
     # 导出公钥, "PEM" 表示使用文本编码输出, 返回的是 bytes 类型, 格式如下:
@@ -180,6 +182,20 @@ def dbInit(db_object):
 
     with open("content/auth/pri.pem", "wb") as pri_fp:
         pri_fp.write(pri_key)
+
+    ### 新建文件传输临时列表数据库
+
+    with open("content/fqueue.db", "a") as fqueue_file:
+        fqueue_file.truncate(0) # 清空
+
+    fQueue_db = sqlite3.connect(root_abspath+"/content/fqueue.db")
+
+    fQ_cur = fQueue_db.cursor()
+
+    # create file transport queue table
+    fQ_cur.execute("CREATE TABLE ft_queue(task_id TEXT, filename TEXT, destination TEXT)")
+
+    fQueue_db.close()
 
 sock_condition = True
 
@@ -322,11 +338,17 @@ if __name__ == "__main__":
         log.logger.info((f"IPv6 Address: {ipv6_addr}"))
     else:
         log.logger.info(("IPv6 is not supported."))
-    try:
-        mainloopThread = threading.Thread(target=lambda:mainloop(server),name="mainloop")
-        mainloopThread.start()
-        consoledThread = threading.Thread(target=consoled,name="consoled")
-        consoledThread.start()
-    finally:
-        maindb.close()
-        sys.exit()
+
+    mainloopThread = threading.Thread(target=lambda:mainloop(server),name="mainloop")
+    mainloopThread.start()
+    consoledThread = threading.Thread(target=consoled,name="consoled")
+    consoledThread.start()
+
+    # 初始化 FileServer
+    fileServerThread = threading.Thread(target=ftserver.__main__, \
+                                        args=(ipv4_addr[0], config["connect"]["file_cmd_port"], config["connect"]["file_data_port"], root_abspath,),\
+                                        name="fileServerThread")
+    fileServerThread.daemon = False
+    fileServerThread.start()
+
+

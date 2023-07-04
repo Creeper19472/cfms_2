@@ -11,12 +11,21 @@ ipv4_enabled = true
 ipv6_enabled = false
 ipv4_addr = "0.0.0.0"
 ipv6_addr = ""
+
 port = 5103
+
+file_cmd_port = 5104
+file_data_port = 5105
 
 [security]
 # 是否在每次启动时更新 token_secret ? 如果是，则重启服务后将导致所有 token 失效。
 # 不更新适合于服务器在异常下线后重新启动。
 update_token_secret_at_startup = true
+
+# 是否在用户请求目录列表时隐藏无权访问的目录或文件？
+# 设置为 true 来启用，建议开启。
+# 未来本设置将移动至策略。
+hide_when_no_access = true
 
 [database]
 db_name = "general.db"

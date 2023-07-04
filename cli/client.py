@@ -165,6 +165,7 @@ sha256_obj = hashlib.sha256()
 sha256_obj.update(raw_passwd.encode())
 
 request_data = {
+    "version": 1,
     "request": "login",
     "data": {
         "username": "admin",
@@ -194,13 +195,14 @@ while count < 20:
     count += 1
 
     time.sleep(1)
-    object_conn.send("hello")
-    received = object_conn.recv()
+    # object_conn.send("hello")
+    # received = object_conn.recv()
     print("Received: {}".format(received))
     object_conn.send(json.dumps(
         {
+            "version": 1,
             "request": "refreshToken",
-            "authentication": {
+            "auth": {
                 "username": "admin",
                 "token":  token
             }
@@ -211,9 +213,10 @@ while count < 20:
 
     object_conn.send(json.dumps(
         {
+            "version": 1,
             "request": "getDir",
-            "data": {"id": "dir0"},
-            "authentication": {
+            "data": {"id": "dir01"},
+            "auth": {
                 "username": "admin",
                 "token":  token
             }
