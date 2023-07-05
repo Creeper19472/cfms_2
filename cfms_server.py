@@ -14,7 +14,7 @@ import include.logtool as logtool
 from include.connThread import * 
 from Crypto.PublicKey import RSA
 
-import include.filesrv_deprecated.ftserver as ftserver
+# import include.filesrv_deprecated.ftserver as ftserver
 
 import secrets
 
@@ -345,11 +345,11 @@ if __name__ == "__main__":
     consoledThread = threading.Thread(target=consoled,name="consoled")
     consoledThread.start()
 
-    # 初始化 FileServer
-    fileServerThread = threading.Thread(target=ftserver.__main__, \
-                                        args=(ipv4_addr[0], config["connect"]["file_cmd_port"], config["connect"]["file_data_port"], root_abspath,),\
-                                        name="fileServerThread")
-    fileServerThread.daemon = False
-    fileServerThread.start()
+    # # 初始化 FileServer
+    # fileServerThread = threading.Thread(target=ftserver.__main__, \
+    #                                     args=(ipv4_addr[0], config["connect"]["file_cmd_port"], config["connect"]["file_data_port"], root_abspath,),\
+    #                                     name="fileServerThread")
+    # fileServerThread.daemon = False
+    # fileServerThread.start()
 
 
