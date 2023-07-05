@@ -374,6 +374,29 @@ class ConnHandler():
             else:
                 self.log.logger.info(f"{req_username} 密码错误，拒绝访问")
 
+                if self.config["security"]["show_login_fail_details"]:
+                    fail_msg = "password incorrect"
+                else:
+                    fail_msg = "username or password incorrect"
+
+                self.__send(json.dumps({
+                    "code": 401,
+                    "msg": fail_msg
+                })
+                )
+        else:
+            if self.config["security"]["show_login_fail_details"]:
+                fail_msg = "user does not exist"
+            else:
+                fail_msg = "username or password incorrect"
+
+            self.__send(json.dumps({
+                "code": 401,
+                "msg": fail_msg
+            })
+            )
+
+
     def handle_refreshToken(self, req_username, old_token):
         user = Users(req_username, self.db_conn) # 初始化用户对象
         # 读取 token_secret

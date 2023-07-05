@@ -81,7 +81,7 @@ class CommandThread(threading.Thread):
         self.this_time_task_id = None
         self.this_time_dest = None
         self.done = False
-        self.singleFile = True
+        self.singleFile = False # True
         self.this_time_filename = None
 
 
@@ -99,7 +99,7 @@ class CommandThread(threading.Thread):
                 self.socket = socket2
                 self.socket.send(
                     # meaningless, but we can make it more meaningful
-                    bytes(f"{lang_dict('ctcs')} {self.host}: {str(self.port)} {divider_arg} {self.dataThread.port}", encoding='utf8'))
+                    bytes(f"{lang_dict('ctcs')} {self.host}: {str(self.port)}", encoding='utf8'))
                 self.commandMessenger = Messenger(self.socket)
                 command = self.commandMessenger.recv_msg()
                 self.start_time = time.time()
@@ -108,13 +108,15 @@ class CommandThread(threading.Thread):
                     if command.startswith(COMMANE_MISSION_SIZE):
                         self.mission_size = int(command.split(divider_arg)[1])
                         print(lang_dict('m_s')+': %s' % formated_size(self.mission_size))
-                    elif command.startswith(COMMAND_REGISTER_FILE_ID):
+                    
+                    elif command.startswith(COMMANE_FILE_INFO):
 
                         fQueue_db = sqlite3.connect(ROOT_ABSPATH+"/content/fqueue.db")
                         # 没有额外执行检查的机制，因为这个操作应该早已完成
                         fQ_cur = fQueue_db.cursor()
 
                         given_task_id = command.split(divider_arg)[1]
+                        # print(given_task_id)
 
                         fQ_cur.execute("select filename, destination FROM ft_queue WHERE task_id = ?", (given_task_id,))
 
@@ -124,26 +126,21 @@ class CommandThread(threading.Thread):
                             raise RuntimeError("数据库中记录了不止一个同id的传输任务")
                         elif len(task_details) < 1:
                             self.commandMessenger.send_msg("指定的任务不存在或已过期")
+                            continue
                         else:
-                            self.this_time_task_id = given_task_id
-                            self.this_time_filename, self.this_time_dest = task_details[0]
-                            self.done = False
-                            self.commandMessenger.send_msg("OK")
-                    
-                    elif command.startswith(COMMANE_FILE_INFO):
-                        if self.singleFile and self.done:
-                            self.commandMessenger.send_msg("该id指向一个单独的文件且已完成上传")
-                            continue
-                        
-                        if not self.this_time_task_id:
-                            self.commandMessenger.send_msg("尚未注册任务ID。")
-                            continue
+                            if not self.this_time_task_id == given_task_id or (not self.singleFile):
+                                self.this_time_task_id = given_task_id
+                                self.this_time_filename, self.this_time_dest = task_details[0]
+                                self.done = False
+                            else:
+                                self.commandMessenger.send_msg("该ID已完成上传")
+                                continue
+
+                        self.commandMessenger.send_msg("OK")
 
                         self.fileMission = FileMission(self.dataThread.socket, self, self.this_time_dest, command)
                         self.fileMission.start()
                         self.dataOn = True
-
-                        self.commandMessenger.send_msg("OK")
 
                     elif command == COMMAND_DATA_PORT:
                         self.socket.send(bytes(str(self.dataThread.port), encoding="utf-8"))
@@ -165,6 +162,9 @@ class CommandThread(threading.Thread):
 
     def file_transportover(self,fileinfo):
         self.commandMessenger.send_msg(fileinfo + divider_arg +'file_transport_ok')
+        if self.singleFile:
+            # self.done = True
+            pass
 
 
     def file_existed(self,fileinfo):
@@ -246,21 +246,21 @@ class FileMission(threading.Thread):
     def handleMission(self):
         if self.fileinfo:
             print(self.fileinfo)
-            self.filename = self.fileinfo.split(divider_arg)[1]
+            self.filename = self.fileinfo.split(divider_arg)[2]
             print(self.filename)
             self.filename = self.filename.replace(anti_dir_divider(), dir_divider())
             print(self.filename)
             self.file_path = str(self.save_path + dir_divider() + self.filename)
             self.file_path = self.file_path.replace(anti_dir_divider(), dir_divider())
-            self.filesize = int(self.fileinfo.split(divider_arg)[2])
+            self.filesize = int(self.fileinfo.split(divider_arg)[3])
         if self.filesize >= 0:
-            self.file_md5 = self.fileinfo.split(divider_arg)[3]
+            self.file_md5 = self.fileinfo.split(divider_arg)[4]
             self.write_filedata()
         elif self.filesize == -1:
             if not os.path.exists(self.file_path):
                 os.makedirs(self.file_path)
-            index = int(self.fileinfo.split(divider_arg)[3])
-            dir = self.fileinfo.split(divider_arg)[1]
+            index = int(self.fileinfo.split(divider_arg)[4])
+            dir = self.fileinfo.split(divider_arg)[2]
 
             if index == 0:
                 print(right_arrows+lang_dict('ms')+left_arrows)

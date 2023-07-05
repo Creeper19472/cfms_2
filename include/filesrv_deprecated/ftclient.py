@@ -45,6 +45,8 @@ COMMANE_MISSION_SIZE = '[COMMAND MISSION_SIZE]'
 COMMANE_FILE_INFO = '[COMMAND FILE_INFO]'
 COMMANE_DATA_PORT = '[COMMAND DATA_PORT]'
 
+task_id = "fde8e8" # test
+
 class Messenger:
     def __init__(self,socket):
         self.socket = socket
@@ -186,7 +188,7 @@ class Client(threading.Thread , FileFinder.FinderCallback):
         print(dict('cd')+ os.path.basename(self.rootpath)+dir_divider()+relative_path(self.rootpath,dir_path))
         self.filename = dir_path
         self.filesize = -1
-        self.commandThread.send_fileinfo(COMMANE_FILE_INFO + divider_arg
+        self.commandThread.send_fileinfo(COMMANE_FILE_INFO + divider_arg + task_id + divider_arg
                                          +os.path.basename(self.rootpath) + dir_divider()+relative_path(self.rootpath,dir_path)+ divider_arg
                                          +str(-1)+divider_arg+
                                          str(msg_index))
@@ -202,13 +204,13 @@ class Client(threading.Thread , FileFinder.FinderCallback):
         print(f"L183: {self.filename}")
         self.filesize = size
         if (os.path.isfile(file_path) and relative_path(self.rootpath,file_path) == ''):
-            self.commandThread.send_fileinfo(COMMANE_FILE_INFO + divider_arg +
+            self.commandThread.send_fileinfo(COMMANE_FILE_INFO + divider_arg + task_id + divider_arg +
                                              os.path.basename(file_path) + divider_arg+
                                              str(size) + divider_arg+
                                              getFileMd5(file_path) + divider_arg+
                                              str(msg_index))
         else:
-            self.commandThread.send_fileinfo(COMMANE_FILE_INFO + divider_arg +
+            self.commandThread.send_fileinfo(COMMANE_FILE_INFO + divider_arg + task_id + divider_arg +
                                              os.path.basename(self.rootpath) + dir_divider()+ relative_path(self.rootpath,file_path) + divider_arg+
                                              str(size) + divider_arg +
                                              getFileMd5(file_path) + divider_arg +
@@ -228,13 +230,13 @@ class Client(threading.Thread , FileFinder.FinderCallback):
             if self.connect_to_server():
                 print(dict('cd') + os.path.basename(self.filepath))
                 print(f"L209: {os.path.basename(self.filepath)}")
-                self.commandThread.send_command(COMMANE_FILE_INFO + divider_arg+
+                self.commandThread.send_command(COMMANE_FILE_INFO + divider_arg + task_id + divider_arg +
                                                 os.path.basename(self.filepath) + divider_arg +
                                                 '-1' +divider_arg
                                                 + str(msg_index))
-                if (return_msg:=self.commandThread.messenger.recv_msg()) != "OK":
-                    print(f"ERROR: {return_msg}")
-                    raise
+                # if (return_msg:=self.commandThread.messenger.recv_msg()) != "OK":
+                #     print(f"ERROR: {return_msg}")
+                #     sys.exit()
                 # divider_arg 用的符号不能当文件名，所以确实可以把 _*_ 当分隔符
                 # 但是老哥这样简单粗暴地写真的好吗？
                 while self.waitingCreateDir:

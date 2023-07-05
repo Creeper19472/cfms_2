@@ -14,7 +14,7 @@ import include.logtool as logtool
 from include.connThread import * 
 from Crypto.PublicKey import RSA
 
-import include.filesrv.ftserver as ftserver
+import include.filesrv_deprecated.ftserver as ftserver
 
 import secrets
 
@@ -267,6 +267,7 @@ print(root_abspath)
 log = logtool.LogClass(logname="main", filepath=''.join((root_abspath, '/main.log')))
 
 if __name__ == "__main__":
+
     # 如果被作为主程序运行，就开始面向前台的准备过程
 
     # load toml
