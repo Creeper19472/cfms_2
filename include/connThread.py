@@ -339,9 +339,24 @@ class ConnHandler():
             self.handle_getDir(loaded_recv, user)
 
         elif loaded_recv["request"] == "getPolicy":
-            # TODO
+
+            # 验证 token
+            user = Users(attached_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(attached_token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
             
-            self.handle_getPolicy(loaded_recv)
+            user.load()
+            
+            self.handle_getPolicy(loaded_recv, user)
 
         elif loaded_recv["request"] == "disconnect":
             self.__send("Goodbye")
@@ -532,9 +547,49 @@ class ConnHandler():
                 "msg": "internal server error"
             }))
 
-    def handle_getPolicy(self, loaded_recv, user: object):
-        loaded_recv[""]
+    def handle_getPolicy(self, loaded_recv, user: Users):
+        req_policy_name = loaded_recv["data"]["policy_name"]
 
+    def handle_getFile(self, loaded_recv, user: Users):
+        file_id = loaded_recv["data"]["file_id"]
+
+        handle_cursor = self.db_conn.cursor()
+
+        handle_cursor.execute("SELECT name, parent_id, type, file_id, access_rule, external_access, properties FROM path_structures WHERE id = ?", \
+                              (file_id,))
+        
+        result = handle_cursor.fetchall()
+
+        if len(result) > 1:
+            raise ValueError("Invaild query result length")
+        elif len(result) < 1:
+            self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "no such file"
+                }))
+            return
+        else:
+            if result[0][2] != "file":
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "not a file"
+                }))
+                return
+            
+            req_action = loaded_recv["data"]["action"]
+
+            if req_action in ["read", "write", "rename", "delete", "permanently_delete", "recover"]:
+
+                if not self.verifyUserAccess(file_id, req_action, user):
+                    self.__send(json.dumps({
+                        "code": 403,
+                        "msg": "permission denied"
+                    }))
+                    self.log.logger.debug("权限校验失败：无权执行所请求的操作")
+                    return
+                
+                if req_action == "read":
+                    pass
                 
 
 

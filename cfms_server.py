@@ -118,7 +118,7 @@ def dbInit(db_object):
     cur.executemany("INSERT INTO groups VALUES(?, ?, ?, ?, ?)", insert_groups)
 
     # 新建伪路径索引定义表
-    cur.execute("CREATE TABLE path_structures(id TEXT, name TEXT, parent_id TEXT, type TEXT, file_id TEXT, access_rules BLOB, external_access BLOB, properties BLOB)")
+    cur.execute("CREATE TABLE path_structures(id TEXT, name TEXT, owner TEXT, parent_id TEXT, type TEXT, file_id TEXT, access_rules BLOB, external_access BLOB, properties BLOB)")
     # file_id: 如果是文件就必须有；文件夹应该没有
 
     insert_doc_access_rules = {
@@ -143,7 +143,7 @@ def dbInit(db_object):
 
 
     insert_paths = (
-        ("C00001", "hello.txt", "", "file", "0", json.dumps(insert_doc_access_rules), json.dumps(insert_doc_external_access), json.dumps({})),
+        ("C00001", "hello.txt", json.dumps(("user", "admin")), "", "file", "0", json.dumps(insert_doc_access_rules), json.dumps(insert_doc_external_access), json.dumps({})),
     )
     cur.executemany("INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?, ?, ?)", insert_paths)
 

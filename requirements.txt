@@ -8,3 +8,5 @@ chardet
 idna
 requests
 urllib3
+
+pyftpdlib
