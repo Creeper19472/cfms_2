@@ -226,6 +226,23 @@ while count < 20:
     received = object_conn.recv()
     print("Received: {}".format(received))
 
+    object_conn.send(json.dumps(
+        {
+            "version": 1,
+            "request": "operateFile",
+            "data": {"file_id": "C00001",
+                     "action": "read"},
+            "auth": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
+
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
+
 object_conn.send(json.dumps({
     "request": "disconnect"
 }))

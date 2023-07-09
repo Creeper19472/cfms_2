@@ -15,8 +15,10 @@ from include.connThread import *
 from Crypto.PublicKey import RSA
 
 # import include.filesrv_deprecated.ftserver as ftserver
+import include.fileftp.pyftpd as pyftpd
 
 import secrets
+import string
 
 class DB_Sqlite3(object):
     def __init__(self, filename):
@@ -46,7 +48,7 @@ def dbInit(db_object):
     # 获取由4位随机大小写字母、数字组成的salt值
     def create_salt(length = 4):
         salt = ''
-        chars = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789'
+        chars = string.printable # 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789'
         len_chars = len(chars) - 1
         for i in range(0, length):
             # 每次从chars中随机取一位
@@ -193,9 +195,101 @@ def dbInit(db_object):
     fQ_cur = fQueue_db.cursor()
 
     # create file transport queue table
-    fQ_cur.execute("CREATE TABLE ft_queue(task_id TEXT, filename TEXT, destination TEXT)")
+    fQ_cur.execute("CREATE TABLE ft_queue(task_id TEXT, token TEXT, operation TEXT, file_id TEXT, fake_id TEXT, fake_dir TEXT, done INTEGER)")
+    # file_id: 存贮在 document_indexes 中的文件id
+    # fake_id: 这个 id 将作为 ftp 服务中以 task_id 为账户名的用户目录下的文件名。
 
     fQueue_db.close()
+
+    ### Init FTP SSL
+
+    from OpenSSL import crypto
+
+    ###########
+    # CA Cert #
+    ###########
+
+    ca_key = crypto.PKey()
+    ca_key.generate_key(crypto.TYPE_RSA, 2048)
+
+    ca_cert = crypto.X509()
+    ca_cert.set_version(2)
+    ca_cert.set_serial_number(random.randint(50000000,100000000))
+
+    ca_subj = ca_cert.get_subject()
+    ca_subj.commonName = "CFMS Self CA"
+
+    ca_cert.add_extensions([
+        crypto.X509Extension(b"subjectKeyIdentifier", False, b"hash", subject=ca_cert),
+    ])
+
+    ca_cert.add_extensions([
+        crypto.X509Extension(b"authorityKeyIdentifier", False, b"keyid:always", issuer=ca_cert),
+    ])
+
+    ca_cert.add_extensions([
+        crypto.X509Extension(b"basicConstraints", False, b"CA:TRUE"),
+        crypto.X509Extension(b"keyUsage", False, b"keyCertSign, cRLSign"),
+    ])
+
+    ca_cert.set_issuer(ca_subj)
+    ca_cert.set_pubkey(ca_key)
+
+    ca_cert.gmtime_adj_notBefore(0)
+    ca_cert.gmtime_adj_notAfter(10*365*24*60*60)
+
+    ca_cert.sign(ca_key, 'sha256')
+
+    # Save certificate
+    with open(f"{root_abspath}/content/auth/ca.crt", "wt") as f:
+        f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, ca_cert).decode())
+
+    # Save private key
+    with open(f"{root_abspath}/content/auth/ca.key", "wt") as f:
+        f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, ca_key).decode())
+
+    ###############
+    # Client Cert #
+    ###############
+
+    client_key = crypto.PKey()
+    client_key.generate_key(crypto.TYPE_RSA, 2048)
+
+    client_cert = crypto.X509()
+    client_cert.set_version(2)
+    client_cert.set_serial_number(random.randint(50000000,100000000))
+
+    client_subj = client_cert.get_subject()
+    client_subj.commonName = "CFMS Server self-signed"
+
+    client_cert.add_extensions([
+        crypto.X509Extension(b"basicConstraints", False, b"CA:FALSE"),
+        crypto.X509Extension(b"subjectKeyIdentifier", False, b"hash", subject=client_cert),
+    ])
+
+    client_cert.add_extensions([
+        crypto.X509Extension(b"authorityKeyIdentifier", False, b"keyid:always", issuer=ca_cert),
+        crypto.X509Extension(b"extendedKeyUsage", False, b"clientAuth"),
+        crypto.X509Extension(b"keyUsage", False, b"digitalSignature"),
+    ])
+
+    client_cert.set_issuer(ca_subj)
+    client_cert.set_pubkey(client_key)
+
+    client_cert.gmtime_adj_notBefore(0)
+    client_cert.gmtime_adj_notAfter(10*365*24*60*60)
+
+    client_cert.sign(ca_key, 'sha256')
+
+    # print(crypto.dump_certificate(crypto.FILETYPE_TEXT, client_cert))
+
+    # Save certificate
+    with open(f"{root_abspath}/content/auth/ftp_client.crt", "wt") as f:
+        f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, client_cert).decode())
+
+    # Save private key
+    with open(f"{root_abspath}/content/auth/ftp_client.key", "wt") as f:
+        f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, client_key).decode())
 
 sock_condition = True
 
@@ -298,7 +392,7 @@ if __name__ == "__main__":
     maindb = DB_Sqlite3(f"{root_abspath}/general.db")
     m_cur = maindb.conn.cursor()
 
-    print(type(maindb.conn))
+    # print(type(maindb.conn))
 
     # 加载语言配置
     language = config["general"]["locale"]
@@ -342,8 +436,9 @@ if __name__ == "__main__":
 
     mainloopThread = threading.Thread(target=lambda:mainloop(server),name="mainloop")
     mainloopThread.start()
-    consoledThread = threading.Thread(target=consoled,name="consoled")
-    consoledThread.start()
+
+    # consoledThread = threading.Thread(target=consoled,name="consoled")
+    # consoledThread.start()
 
     # # 初始化 FileServer
     # fileServerThread = threading.Thread(target=ftserver.__main__, \
@@ -351,5 +446,12 @@ if __name__ == "__main__":
     #                                     name="fileServerThread")
     # fileServerThread.daemon = False
     # fileServerThread.start()
+
+    # 初始化 FTPServer
+    FTPServerThread = threading.Thread(target=pyftpd.main, \
+                                        args=(root_abspath, config["connect"]["ftp_port"]),\
+                                        name="FTPServerThread")
+    FTPServerThread.daemon = False
+    FTPServerThread.start()
 
 

@@ -14,8 +14,12 @@ ipv6_addr = ""
 
 port = 5103
 
+# 已弃用。
 file_cmd_port = 5104
 file_data_port = 5105
+
+# 服务器应当以哪个端口开放 FTP 服务（文件传输所必需的）？
+ftp_port = 5104
 
 [security]
 # 是否在每次启动时更新 token_secret ? 如果是，则重启服务后将导致所有 token 失效。

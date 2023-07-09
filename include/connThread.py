@@ -1,5 +1,7 @@
 # connThread.py
 
+import secrets
+import hashlib
 import threading
 import time
 import gettext
@@ -318,6 +320,30 @@ class ConnHandler():
 
             self.handle_getDocument(loaded_recv, attached_username, attached_token)
 
+        elif loaded_recv["request"] == "operateFile":
+            
+            ### 通用用户令牌鉴权开始
+            
+            # 验证 token
+            user = Users(attached_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(attached_token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
+            
+            user.load()
+
+            ### 结束
+
+            self.handle_operateFile(loaded_recv, user)
+
         elif loaded_recv["request"] == "getDir":
             
             # 验证 token
@@ -550,12 +576,12 @@ class ConnHandler():
     def handle_getPolicy(self, loaded_recv, user: Users):
         req_policy_name = loaded_recv["data"]["policy_name"]
 
-    def handle_getFile(self, loaded_recv, user: Users):
+    def handle_operateFile(self, loaded_recv, user: Users):
         file_id = loaded_recv["data"]["file_id"]
 
         handle_cursor = self.db_conn.cursor()
 
-        handle_cursor.execute("SELECT name, parent_id, type, file_id, access_rule, external_access, properties FROM path_structures WHERE id = ?", \
+        handle_cursor.execute("SELECT name, parent_id, type, file_id, access_rules, external_access, properties FROM path_structures WHERE id = ?", \
                               (file_id,))
         
         result = handle_cursor.fetchall()
@@ -578,6 +604,8 @@ class ConnHandler():
             
             req_action = loaded_recv["data"]["action"]
 
+            self.log.logger.debug(f"请求对文件的操作：{req_action}")
+
             if req_action in ["read", "write", "rename", "delete", "permanently_delete", "recover"]:
 
                 if not self.verifyUserAccess(file_id, req_action, user):
@@ -589,7 +617,61 @@ class ConnHandler():
                     return
                 
                 if req_action == "read":
-                    pass
+                    # 权限检查已在上一步完成
+
+                    query_file_id = result[0][3]
+
+                    fqueue_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
+
+                    fq_cur = fqueue_db.cursor()
+
+                    task_id = secrets.token_hex(64)
+                    
+                    token_hash = secrets.token_hex(64)
+                    token_salt = secrets.token_hex(16)
+
+                    operation = "read"
+
+                    token_hash_sha256 = hashlib.sha256(token_hash.encode()).hexdigest()
+                    final_token_hash_obj = hashlib.sha256()
+                    final_token_hash_obj.update((token_hash_sha256+token_salt).encode())
+
+                    final_token_hash = final_token_hash_obj.hexdigest()
+
+                    token_to_store = (final_token_hash, token_salt)
+
+                    # fake_id, fake_dir(set to task_id)
+                    fake_id = secrets.token_hex(64)
+                    fake_dir = task_id
+
+                    fq_cur.execute("INSERT INTO ft_queue (task_id, operation, token, fake_id, fake_dir, file_id, done) \
+                                   VALUES ( ?, ?, ?, ?, ?, ?, 0 );", (task_id, operation, json.dumps(token_to_store),\
+                                                                       fake_id, fake_dir, query_file_id))
+                    
+                    fqueue_db.commit()
+                    fqueue_db.close()
+
+                    response = {
+                        "code": 0,
+                        "msg": "ok",
+                        "data": {
+                            "task_id": task_id,
+                            "token": token_hash, # original hash
+                            "t_filename": fake_id
+                        }
+                    }
+
+                    self.__send(json.dumps(response))
+
+                    return
+
+            else:
+                self.__send(json.dumps({
+                        "code": -1,
+                        "msg": "请求的操作不存在"
+                    }))
+                self.log.logger.debug("请求的操作不存在。")
+                return
                 
 
 
