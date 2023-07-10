@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = "1.0.0.230628_alpha"
+CORE_VERSION = "1.0.0.230710_alpha"
 
 # import importlib
 
@@ -145,9 +145,10 @@ def dbInit(db_object):
 
 
     insert_paths = (
-        ("C00001", "hello.txt", json.dumps(("user", "admin")), "", "file", "0", json.dumps(insert_doc_access_rules), json.dumps(insert_doc_external_access), json.dumps({})),
+        ("C00001", "hello.txt", json.dumps((("user", "admin"),)), "", "file", "0", 
+         json.dumps(insert_doc_access_rules), json.dumps(insert_doc_external_access), json.dumps({})),
     )
-    cur.executemany("INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?, ?, ?)", insert_paths)
+    cur.executemany("INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", insert_paths)
 
     # create config table(internal)
     cur.execute("CREATE TABLE cfms_internal(id TEXT, key TEXT, value BLOB)")
@@ -195,7 +196,10 @@ def dbInit(db_object):
     fQ_cur = fQueue_db.cursor()
 
     # create file transport queue table
-    fQ_cur.execute("CREATE TABLE ft_queue(task_id TEXT, token TEXT, operation TEXT, file_id TEXT, fake_id TEXT, fake_dir TEXT, done INTEGER)")
+    fQ_cur.execute(
+        "CREATE TABLE ft_queue\
+            (task_id TEXT, token TEXT, operation TEXT, file_id TEXT, fake_id TEXT, fake_dir TEXT, expire_time INTEGER, done INTEGER)"
+        )
     # file_id: 存贮在 document_indexes 中的文件id
     # fake_id: 这个 id 将作为 ftp 服务中以 task_id 为账户名的用户目录下的文件名。
 

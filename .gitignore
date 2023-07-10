@@ -1,7 +1,10 @@
-general.db
-main.log
+*.db
+*.log
 *.pyc
 *.pem
+
+content/temp/
+
 __pycache__
 include/__pycache__/connThread.cpython-311.pyc
 include/__pycache__/logtool.cpython-311.pyc

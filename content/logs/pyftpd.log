@@ -1,7 +1,0 @@
-2023-07-09 20:26:50,157 - pyftpdlib - INFO - concurrency model: multi-thread
-2023-07-09 20:26:50,158 - pyftpdlib - INFO - masquerade (NAT) address: None
-2023-07-09 20:26:50,159 - pyftpdlib - INFO - passive ports: None
-2023-07-09 20:27:16,105 - pyftpdlib - INFO - ::1:61544-[] FTP session opened (connect)
-2023-07-09 20:27:21,133 - pyftpdlib - INFO - ::1:61544-[] USER '77a1c53610c99759a153d3b2a86e9185581214f95f668b875273cf3762dc101f467fc3b4fcf43b3c60fc3251aec7a6973799ae817b6703ca44028e5af4510064' failed login.
-2023-07-09 20:27:43,447 - pyftpdlib - INFO - ::1:61545-[] FTP session opened (connect)
-2023-07-09 20:27:46,465 - pyftpdlib - INFO - ::1:61545-[] USER '77a1c53610c99759a153d3b2a86e9185581214f95f668b875273cf3762dc101f467fc3b4fcf43b3c60fc3251aec7a6973799ae817b6703ca44028e5af4510064' failed login.

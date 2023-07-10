@@ -35,7 +35,8 @@ class ConnThreads(threading.Thread):
         try:
             target_class.main()
         except Exception as e:
-            e.add_note("看起来线程内部的运行出现了问题。")
+            e.add_note("看起来线程内部的运行出现了问题。将关闭到客户端的连接。")
+            target_class.conn.close()
             raise
 
 class ConnHandler():
@@ -576,6 +577,8 @@ class ConnHandler():
     def handle_getPolicy(self, loaded_recv, user: Users):
         req_policy_name = loaded_recv["data"]["policy_name"]
 
+        
+
     def handle_operateFile(self, loaded_recv, user: Users):
         file_id = loaded_recv["data"]["file_id"]
 
@@ -616,10 +619,10 @@ class ConnHandler():
                     self.log.logger.debug("权限校验失败：无权执行所请求的操作")
                     return
                 
+                query_file_id = result[0][3]
+                
                 if req_action == "read":
                     # 权限检查已在上一步完成
-
-                    query_file_id = result[0][3]
 
                     fqueue_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
 
@@ -644,9 +647,11 @@ class ConnHandler():
                     fake_id = secrets.token_hex(64)
                     fake_dir = task_id
 
-                    fq_cur.execute("INSERT INTO ft_queue (task_id, operation, token, fake_id, fake_dir, file_id, done) \
-                                   VALUES ( ?, ?, ?, ?, ?, ?, 0 );", (task_id, operation, json.dumps(token_to_store),\
-                                                                       fake_id, fake_dir, query_file_id))
+                    expire_time = time.time() + 3600 # TODO
+
+                    fq_cur.execute("INSERT INTO ft_queue (task_id, operation, token, fake_id, fake_dir, file_id, expire_time, done) \
+                                   VALUES ( ?, ?, ?, ?, ?, ?, ?, 0 );", (task_id, operation, json.dumps(token_to_store),\
+                                                                       fake_id, fake_dir, query_file_id, expire_time))
                     
                     fqueue_db.commit()
                     fqueue_db.close()
@@ -656,7 +661,8 @@ class ConnHandler():
                         "msg": "ok",
                         "data": {
                             "task_id": task_id,
-                            "token": token_hash, # original hash
+                            "token": token_hash_sha256, # original hash after sha256
+                            "expire_time": expire_time,
                             "t_filename": fake_id
                         }
                     }
@@ -664,6 +670,30 @@ class ConnHandler():
                     self.__send(json.dumps(response))
 
                     return
+                
+                elif req_action == "rename":
+
+                    try:
+                        new_filename = loaded_recv["data"]["new_filename"]
+                    except ValueError:
+                        self.__send(json.dumps({
+                            "code": -1,
+                            "msg": "not all arguments provided"
+                        }))
+                        return
+                    
+                    handle_cursor.execute("UPDATE path_structures SET name = ? WHERE ID = ?;", (new_filename, query_file_id))
+
+                    self.__send(json.dumps({
+                        "code": 0,
+                        "msg": "success"
+                    }))
+
+                    return
+                
+                elif req_action == "delete":
+                    pass
+
 
             else:
                 self.__send(json.dumps({

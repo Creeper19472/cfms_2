@@ -1,4 +1,5 @@
 import multiprocessing
+import time
 
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import ThreadedFTPServer  # <-
@@ -18,6 +19,13 @@ from pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 import logging
 
 class FTPCustomizedHandler(TLS_FTPHandler):
+    def handle_timeout(self):
+        """Called when client does not send any command within the time
+        specified in <timeout> attribute."""
+        msg = "Control connection timed out."
+        self.respond("421 " + msg, logfun=self.logger.info)
+        self.close() # right now, trying to solve cpu 20%
+
     def on_disconnect(self):
         """Called when connection is closed."""
         if self.authenticated:
@@ -50,6 +58,9 @@ class FTPCustomizedHandler(TLS_FTPHandler):
 
         fq_db.commit()
         fq_db.close()
+
+    def on_login_failed(self, username, password):
+        self.close() # temp fix
 
 
 class DummyMD5Authorizer(DummyAuthorizer):
@@ -94,12 +105,15 @@ class DummyMD5Authorizer(DummyAuthorizer):
         except KeyError:
             raise AuthenticationFailed
         
-        fq_cursor.execute("SELECT done, operation from ft_queue where task_id = ?", (username,))
+        fq_cursor.execute("SELECT done, expire_time, operation from ft_queue where task_id = ?", (username,))
 
-        if_done, operation = fq_cursor.fetchone()
+        if_done, expire_time, operation = fq_cursor.fetchone()
 
         if if_done:
             raise AuthenticationFailed # if a task is done, this account will not be able to access again
+        
+        if expire_time and (expire_time < time.time()):
+            raise AuthenticationFailed
 
         if not self.has_user(username): 
             # 如果无该用户则初始化，但未断开前不会清除临时用户，故对用户权限的更改在下次连接才能生效
