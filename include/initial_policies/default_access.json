@@ -1,0 +1,47 @@
+{
+    "policy_id": "permission_on_rootdir",
+    "access_rules": {},
+    "external_access": {},
+    "content": {
+        "inherit_by_subdirectory": true,
+        "rules": {
+            "access_rules": [
+                {
+                    "read": [
+                        {}
+                    ],
+                    "write": [
+                        {
+                            "match": "all",
+                            "match_groups": [
+                                {
+                                    "match": "all",
+                                    "groups": {
+                                        "match": "all",
+                                        "require": ["sysop"]
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "external_access": {
+                "groups": {
+                    "sysop": {
+                        "read": {
+                            "expire": 0
+                        },
+                        "write": {
+                            "expire": 0
+                        },
+                        "permanently_delete": {
+                            "expire": 0
+                        }
+                    }
+                },
+                "users": {}
+            }
+        }
+    }
+}

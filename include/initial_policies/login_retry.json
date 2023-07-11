@@ -1,0 +1,9 @@
+{
+    "policy_id": "login_retry",
+    "access_rules": {},
+    "external_access": {},
+    "content": {
+        "blockAfterRetries": 0
+    },
+    "__comments__": "此为登录策略对重试次数的限制。"
+}

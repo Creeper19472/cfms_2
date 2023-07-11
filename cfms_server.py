@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = "1.0.0.230710_alpha"
+CORE_VERSION = "1.0.0.230711_alpha"
 
 # import importlib
 
@@ -36,7 +36,7 @@ class DB_Sqlite3(object):
     def close(self):
         self.conn.close()
 
-def dbInit(db_object):
+def dbInit(db_object: DB_Sqlite3):
     cur = db_object.conn.cursor()
     cur.execute("CREATE TABLE users(username TEXT, hash TEXT, salt TEXT, rights BLOB, groups BLOB)")
     """
@@ -154,7 +154,29 @@ def dbInit(db_object):
     cur.execute("CREATE TABLE cfms_internal(id TEXT, key TEXT, value BLOB)")
     cur.execute("INSERT INTO cfms_internal VALUES(?, ?, ?)", (0, "db_version", CORE_VERSION))
 
+    # create policy table
+    log.logger.debug("正在创建策略表。")
+    cur.execute("CREATE TABLE policies(id TEXT, content TEXT, access_rules TEXT, external_access TEXT)")
 
+    for dirpath, dirnames, filenames in os.walk(f"{root_abspath}/include/initial_policies"):
+        for file in filenames:
+            if not file.endswith(".json"):
+                continue
+            with open(os.path.join(dirpath, file), "r", encoding="utf-8") as f: # force utf-8
+                loaded_json = json.load(f)
+                policy_id = loaded_json["policy_id"]
+                access_rules = loaded_json["access_rules"]
+                external_access = loaded_json["external_access"]
+                policy_content = loaded_json["content"]
+
+                log.logger.debug(f"正在导入策略 {policy_id}。")
+                cur.execute("INSERT INTO policies VALUES(?, ?, ?, ?)", (policy_id, json.dumps(policy_content), \
+                                                                        json.dumps(access_rules), json.dumps(external_access)))
+                log.logger.debug("导入成功完成。")
+
+    log.logger.debug("所有策略的导入全部完成。")
+
+    log.logger.debug(f"正在提交，数据库修改量：{db_object.conn.total_changes}")
     db_object.conn.commit()
 
     # 生成一对长度为 2048 位的 RSA 秘钥对, 使用默认的随机数生成函数,

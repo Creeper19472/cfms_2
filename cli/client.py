@@ -191,7 +191,7 @@ token = loaded["token"]
 # username = loaded["username"]
 
 count = 0
-while count < 20:
+while count < 10:
     count += 1
 
     time.sleep(1)
@@ -242,8 +242,24 @@ while count < 20:
     received = object_conn.recv()
     print("Received: {}".format(received))
 
+    object_conn.send(json.dumps(
+        {
+            "version": 1,
+            "request": "getPolicy",
+            "data": {"policy_id": "login_retry"},
+            "auth": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
+
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
 
 object_conn.send(json.dumps({
+    "version": 1,
     "request": "disconnect"
 }))
 received = object_conn.recv()

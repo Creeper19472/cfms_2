@@ -288,6 +288,14 @@ class ConnHandler():
             self.handle_login(req_username, req_password)
 
             return # 如果不返回，那么下面的判断就会被执行了
+        
+        elif loaded_recv["request"] == "disconnect":
+            self.__send("Goodbye")
+            self.conn.close()
+
+            self.log.logger.info("客户端断开连接")
+
+            sys.exit() # 退出线程
 
         
         # 以下的所有请求都应该是需要鉴权的，如果不是请放在上面
@@ -385,13 +393,11 @@ class ConnHandler():
             
             self.handle_getPolicy(loaded_recv, user)
 
-        elif loaded_recv["request"] == "disconnect":
-            self.__send("Goodbye")
-            self.conn.close()
-
-            self.log.logger.info("客户端断开连接")
-
-            sys.exit() # 退出线程
+        else:
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "unknown request"
+            }))
 
 
             
@@ -575,7 +581,70 @@ class ConnHandler():
             }))
 
     def handle_getPolicy(self, loaded_recv, user: Users):
-        req_policy_name = loaded_recv["data"]["policy_name"]
+        req_policy_id = loaded_recv["data"]["policy_id"]
+
+        action = "read" # "getPolicy"，所以目前 action 就是 read
+
+        handle_cursor = self.db_conn.cursor()
+        handle_cursor.execute("SELECT content, access_rules, external_access FROM policies WHERE id = ?", (req_policy_id,))
+
+        fetched = handle_cursor.fetchone()
+        # 不是很想再写判断是否有重复ID的逻辑，反正出了问题看着办吧，这不是我要考虑的事
+
+        if not fetched: # does not exist
+            self.__send(json.dumps({
+                "code": 404,
+                "msg": "the policy you've requested does not exist"
+            }))
+            return
+
+        content = json.loads(fetched[0])
+        access_rules = json.loads(fetched[1])
+        external_access = json.loads(fetched[2])
+
+        if not self.verifyUserAccess_onPolicy(action, access_rules, external_access, user):
+            self.__send(json.dumps({
+                "code": 403,
+                "msg": "forbidden"
+            }))
+        else:
+            self.__send(json.dumps({
+                "code": 0,
+                "data": content
+            }))
+
+        return
+
+    def verifyUserAccess_onPolicy(self, action, access_rules, external_access, user: Users): # 粗暴判断，只是为了调用方便
+        self.log.logger.debug(f"所有访问规则和附加权限记录：{access_rules}, {external_access}")
+
+        if not access_rules: # TODO #7 相同逻辑更新到 verifyUserAccess()
+            return True # fallback
+
+        # access_rules 包括所有规则
+        if user.ifMatchRules(access_rules[action]):
+            return True
+        
+        if external_access:
+            for i in external_access["groups"]:
+                if action not in (i_dict:=external_access["groups"][i]).keys():
+                    continue
+                if (not (expire_time:=i_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户组拥有的权限尚未到期
+                    if user.hasGroups((i,)): # 如果用户存在于此用户组
+                        return True
+                    
+            if user.username in external_access["users"].keys(): # 如果用户在字典中有记录
+                if action in (user_action_dict:=external_access["users"][user.username]).keys(): # 如果请求操作在用户的字典中有记录
+                    if (not (expire_time:=user_action_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户拥有的权限尚未到期
+                        return True
+                
+        self.log.logger.debug("校验失败。")
+        return False
+
+
+        
+        
+
 
         
 

@@ -1,0 +1,8 @@
+{
+    "policy_id": "user_auth",
+    "access_rules": {},
+    "external_access": {},
+    "content": {
+        "allow_register": false
+    }
+}
