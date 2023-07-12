@@ -31,8 +31,8 @@ update_token_secret_at_startup = true
 # 未来本设置将移动至策略。
 hide_when_no_access = true
 
-# 是否为各类型的登录失败返回同样的错误信息？
-show_login_fail_details = true
+# 是否为各类型的登录失败返回详细的错误信息？
+show_login_fail_details = false
 
 [database]
 db_name = "general.db"

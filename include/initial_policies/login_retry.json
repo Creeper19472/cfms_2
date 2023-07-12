@@ -3,7 +3,11 @@
     "access_rules": {},
     "external_access": {},
     "content": {
-        "blockAfterRetries": 0
+        "blockAfterRetries": 0,
+        "temporilyBlockAfterRetries": 5,
+        "temporilyBlockTime": 30,
+        "temporilyBlockTimePerPlusTime": 30,
+        "temporilyBlockTimePerPlusMaxTime": 600
     },
     "__comments__": "此为登录策略对重试次数的限制。"
 }
