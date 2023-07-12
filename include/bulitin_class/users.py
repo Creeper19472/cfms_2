@@ -230,6 +230,9 @@ class Users(object):
                 return False
             elif match_mode == "all":
                 return True 
+            
+        if not rules:
+            return True
 
         for per_match_group in rules:
             if not per_match_group: # quick judgement

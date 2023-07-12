@@ -5,27 +5,25 @@
     "content": {
         "inherit_by_subdirectory": true,
         "rules": {
-            "access_rules": [
-                {
-                    "read": [
-                        {}
-                    ],
-                    "write": [
-                        {
-                            "match": "all",
-                            "match_groups": [
-                                {
+            "access_rules": {
+                "read": [
+                    {}
+                ],
+                "write": [
+                    {
+                        "match": "all",
+                        "match_groups": [
+                            {
+                                "match": "all",
+                                "groups": {
                                     "match": "all",
-                                    "groups": {
-                                        "match": "all",
-                                        "require": ["sysop"]
-                                    }
+                                    "require": ["sysop"]
                                 }
-                            ]
-                        }
-                    ]
-                }
-            ],
+                            }
+                        ]
+                    }
+                ]
+            },
             "external_access": {
                 "groups": {
                     "sysop": {

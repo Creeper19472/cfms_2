@@ -3,6 +3,9 @@
     "access_rules": {},
     "external_access": {},
     "content": {
-        "allow_register": false
+        "allow_registry": false,
+        "default_new_user_groups": ["user"],
+        "default_new_user_rights": [],
+        "sleep_when_login_fail": 3
     }
 }

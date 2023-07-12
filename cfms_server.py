@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = "1.0.0.230711_alpha"
+CORE_VERSION = "1.0.0.230712_alpha"
 
 # import importlib
 

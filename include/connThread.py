@@ -19,6 +19,7 @@ import sqlite3
 
 from include.bulitin_class.users import Users
 from include.bulitin_class.documents import Documents
+from include.bulitin_class.policies import Policies
 
 class ConnThreads(threading.Thread):
     def __init__(self, target, name, args=(), kwargs={}):
@@ -214,30 +215,9 @@ class ConnHandler():
                 }))
                 continue
 
-    def verifyUserAccess(self, id, action, user: Users):
-        """
-        用户鉴权函数。
-        用于逐级检查用户是否拥有访问权限，若发生任意无情况即返回 False
-        """
-        self.log.logger.debug(f"verifyUserAccess(): 正在对 用户 {user.username} 访问 id: {id} 的请求 进行鉴权")
-
-        db_cur = self.db_conn.cursor()
-        db_cur.execute("SELECT parent_id, access_rules, external_access FROM path_structures WHERE id = ?", (id,))
-
-        result = db_cur.fetchall()
-
-        assert len(result) == 1
-
-        if (parent:=result[0][0]):
-            self.log.logger.debug(f"正在检查其父目录 {parent} 的权限...")
-            if not self.verifyUserAccess(parent, action, user):
-                return False
-            self.log.logger.debug("完毕，无事发生。")
-            
-        access_rules = json.loads(result[0][1])
-        external_access = json.loads(result[0][2])
-
-        self.log.logger.debug(f"所有访问规则和附加权限记录：{access_rules}, {external_access}")
+    def _verifyAccess(self, user: Users, action, access_rules: dict, external_access: dict):
+        if not access_rules: # fix #7
+            return True # fallback
 
         # access_rules 包括所有规则
         if user.ifMatchRules(access_rules[action]):
@@ -254,6 +234,50 @@ class ConnHandler():
             if action in (user_action_dict:=external_access["users"][user.username]).keys(): # 如果请求操作在用户的字典中有记录
                 if (not (expire_time:=user_action_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户拥有的权限尚未到期
                     return True
+                
+        return False
+
+    def verifyUserAccess(self, id, action, user: Users):
+        """
+        用户鉴权函数。
+        用于逐级检查用户是否拥有访问权限，若发生任意无情况即返回 False
+        """
+        self.log.logger.debug(f"verifyUserAccess(): 正在对 用户 {user.username} 访问 id: {id} 的请求 进行鉴权")
+
+        db_cur = self.db_conn.cursor()
+        db_cur.execute("SELECT parent_id, access_rules, external_access FROM path_structures WHERE id = ?", (id,))
+
+        result = db_cur.fetchall()
+
+        assert len(result) == 1
+
+        por_policy = Policies("permission_on_rootdir", self.db_conn)
+
+        if (parent:=result[0][0]):
+            self.log.logger.debug(f"正在检查其父目录 {parent} 的权限...")
+            if not self.verifyUserAccess(parent, action, user):
+                return False
+            self.log.logger.debug("完毕，无事发生。")
+        elif por_policy["inherit_by_subdirectory"]:
+            self.log.logger.debug("PoR_IbS 已激活，正在检查用户对于根目录的权限...")
+
+            por_access_rules = por_policy["rules"]["access_rules"]
+            por_external_access = por_policy["rules"]["external_access"]
+
+            if not self._verifyAccess(user, action, por_access_rules, por_external_access):
+                self.log.logger.debug("PoR 鉴权失败")
+                return False
+            else:
+                self.log.logger.debug("PoR 鉴权成功")
+            
+        access_rules = json.loads(result[0][1])
+        external_access = json.loads(result[0][2])
+
+        self.log.logger.debug(f"所有访问规则和附加权限记录：{access_rules}, {external_access}")
+
+        if self._verifyAccess(user, action, access_rules, external_access):
+            self.log.logger.debug(f"verifyUserAccess(): 用户 {user.username} 对于 id: {id} 的请求 鉴权成功")
+            return True
                 
         self.log.logger.debug("校验失败。")
         return False
@@ -422,6 +446,13 @@ class ConnHandler():
             else:
                 self.log.logger.info(f"{req_username} 密码错误，拒绝访问")
 
+                user_auth_policy = Policies("user_auth", self.db_conn)
+                sleep_for_fail = user_auth_policy["sleep_when_login_fail"]
+
+                if sleep_for_fail:
+                    self.log.logger.debug(f"正根据登录策略睡眠 {sleep_for_fail} 秒")
+                    time.sleep(sleep_for_fail)
+
                 if self.config["security"]["show_login_fail_details"]:
                     fail_msg = "password incorrect"
                 else:
@@ -437,6 +468,13 @@ class ConnHandler():
                 fail_msg = "user does not exist"
             else:
                 fail_msg = "username or password incorrect"
+
+            user_auth_policy = Policies("user_auth", self.db_conn)
+            sleep_for_fail = user_auth_policy["sleep_when_login_fail"]
+
+            if sleep_for_fail:
+                self.log.logger.debug(f"正根据登录策略睡眠 {sleep_for_fail} 秒")
+                time.sleep(sleep_for_fail)
 
             self.__send(json.dumps({
                 "code": 401,
@@ -751,7 +789,7 @@ class ConnHandler():
                         }))
                         return
                     
-                    handle_cursor.execute("UPDATE path_structures SET name = ? WHERE ID = ?;", (new_filename, query_file_id))
+                    handle_cursor.execute("UPDATE path_structures SET name = ? WHERE id = ?;", (new_filename, query_file_id))
 
                     self.__send(json.dumps({
                         "code": 0,
