@@ -38,7 +38,7 @@ class DB_Sqlite3(object):
 
 def dbInit(db_object: DB_Sqlite3):
     cur = db_object.conn.cursor()
-    cur.execute("CREATE TABLE users(username TEXT, hash TEXT, salt TEXT, rights BLOB, groups BLOB)")
+    cur.execute("CREATE TABLE users(username TEXT, hash TEXT, salt TEXT, rights BLOB, groups BLOB, properties BLOB)")
     """
     rights: 额外权限。接受列表输入。
     此栏包含的权限将附加于用户个人。
@@ -84,11 +84,30 @@ def dbInit(db_object: DB_Sqlite3):
         }
     }
 
+    user_properties = {
+        "state": 0,
+        "state_description": {
+            "time": 0,
+            "operator": None,
+            "reason": None
+        },
+        "nickname": None,
+        "avatar": {
+            "file_id": None
+        },
+        "publicity": {
+            "restricted": True,
+            "access_rules": {"read": []},
+            # 是一个元组，但只适用于 read 操作；他人修改另有权限判断；
+            "external_access": {}
+        }
+    }
+
     insert_users = (
-        ("admin", sha256, salt, json.dumps(user_rights), json.dumps(user_groups)),
-        ("guest", sha256, salt, json.dumps({}), json.dumps({}))
+        ("admin", sha256, salt, json.dumps(user_rights), json.dumps(user_groups), json.dumps(user_properties)),
+        ("guest", sha256, salt, json.dumps({}), json.dumps({}), json.dumps(user_properties))
     )
-    cur.executemany("INSERT INTO users VALUES(?, ?, ?, ?, ?)", insert_users)
+    cur.executemany("INSERT INTO users VALUES(?, ?, ?, ?, ?, ?)", insert_users)
 
     # 新建文档索引表
     
@@ -101,8 +120,11 @@ def dbInit(db_object: DB_Sqlite3):
     # }
     # 默认的abspath文件名为filename+id的md5
 
-    insert_doc = ("0", root_abspath+"/content/hello.txt") # 潜在问题：不能整体打包移动
-    cur.execute("INSERT INTO document_indexes VALUES(?, ?)", insert_doc)
+    insert_doc = (
+        ("0", root_abspath+"/content/hello.txt"), # 潜在问题：不能整体打包移动
+        ("DEFAULT_USER_AVATAR", root_abspath+"/content/files/user.png")
+    )
+    cur.executemany("INSERT INTO document_indexes VALUES(?, ?)", insert_doc)
 
     # 新建组定义表
     cur.execute("CREATE TABLE groups(id TEXT, name TEXT, enabled INT, rights BLOB, properties BLOB)")
@@ -113,8 +135,14 @@ def dbInit(db_object: DB_Sqlite3):
         }
     }
 
+    sysop_group_rights = {
+        "super_useravatar": {
+            "expire": 0
+        }
+    }
+
     insert_groups = (
-        ("0", "sysop", 1, json.dumps(group_rights), json.dumps({})),
+        ("0", "sysop", 1, json.dumps(sysop_group_rights), json.dumps({})),
         ("1", "user", 1, json.dumps(group_rights), json.dumps({}))
     )
     cur.executemany("INSERT INTO groups VALUES(?, ?, ?, ?, ?)", insert_groups)
@@ -432,6 +460,8 @@ if __name__ == "__main__":
     m_cur.execute("select count(name) from sqlite_master where type='table' order by name;")
     if not m_cur.fetchone()[0]: # count 为0（False）时执行初始化
         dbInit(maindb)
+    
+    maindb.close()
 
     # 初始化 token_secret
     if config["security"]["update_token_secret_at_startup"]:
