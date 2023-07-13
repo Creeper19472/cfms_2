@@ -13,6 +13,18 @@ class Users(object):
         self.db_cursor = db_conn.cursor()
         self.rights = set()
         self.groups = set()
+        self.properties = {}
+
+        self.load() # by default, in order to avoid mistakes
+
+    def __getitem__(self, key):
+        return self.properties[key]
+    
+    def __setitem__(self, key, value):
+        self.properties[key] = value
+    
+    def __contains__(self, item):
+        return item in self.properties
 
     def load(self):
         if not self.ifExists():
@@ -21,19 +33,25 @@ class Users(object):
         prelist = []
         prelist.append(self.username)
 
-        self.db_cursor.execute("SELECT rights, groups from users where username = ?", tuple(prelist))
+        self.db_cursor.execute("SELECT rights, groups, properties from users where username = ?", tuple(prelist))
         result = self.db_cursor.fetchone()
 
         self.rights = set() # 重置
         self.groups = set()
 
+        self.properties = json.loads(result[2])
+
         for i in (loaded_result := json.loads(result[0])):
             if (not (expire_time:=loaded_result[i].get("expire", 0))) or (expire_time > time.time()):
-                self.rights.add(i)
+                if not loaded_result[i].get("revoke", False):
+                    self.rights.add(i)
+                else:
+                    self.rights - {i,} # remove
 
         for j in (loaded_result := json.loads(result[1])):
              if (not (expire_time:=loaded_result[j].get("expire", 0))) or (expire_time > time.time()):
                 self.groups.add(j)
+                # 组不支持 revoke，因为无意义
 
         del loaded_result
 
@@ -48,7 +66,10 @@ class Users(object):
             if per_result[1]:
                 for i in (per_group_rights := json.loads(per_result[0])):
                     if (not (expire_time:=per_group_rights[i].get("expire", 0))) or (expire_time > time.time()):
-                        self.rights.add(i)
+                        if not per_group_rights[i].get("revoke", False):
+                            self.rights.add(i)
+                        else:
+                            self.rights - {i,} # remove
 
     def ifExists(self):
         # 可能注入的位点

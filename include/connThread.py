@@ -223,19 +223,53 @@ class ConnHandler():
         if user.ifMatchRules(access_rules[action]):
             return True
         
-        for i in external_access["groups"]:
-            if action not in (i_dict:=external_access["groups"][i]).keys():
-                continue
-            if (not (expire_time:=i_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户组拥有的权限尚未到期
-                if user.hasGroups((i,)): # 如果用户存在于此用户组
-                    return True
-                
-        if user.username in external_access["users"].keys(): # 如果用户在字典中有记录
-            if action in (user_action_dict:=external_access["users"][user.username]).keys(): # 如果请求操作在用户的字典中有记录
-                if (not (expire_time:=user_action_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户拥有的权限尚未到期
-                    return True
+        if external_access:
+        
+            for i in external_access["groups"]:
+                if action not in (i_dict:=external_access["groups"][i]).keys():
+                    continue
+                if (not (expire_time:=i_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户组拥有的权限尚未到期
+                    if user.hasGroups((i,)): # 如果用户存在于此用户组
+                        return True
+                    
+            if user.username in external_access["users"].keys(): # 如果用户在字典中有记录
+                if action in (user_action_dict:=external_access["users"][user.username]).keys(): # 如果请求操作在用户的字典中有记录
+                    if (not (expire_time:=user_action_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户拥有的权限尚未到期
+                        return True
                 
         return False
+    
+    def createFileTask(self, file_id, task_id=secrets.token_hex(64), operation="read"):
+        fqueue_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
+
+        fq_cur = fqueue_db.cursor()
+        
+        token_hash = secrets.token_hex(64)
+        token_salt = secrets.token_hex(16)
+
+        token_hash_sha256 = hashlib.sha256(token_hash.encode()).hexdigest()
+        final_token_hash_obj = hashlib.sha256()
+        final_token_hash_obj.update((token_hash_sha256+token_salt).encode())
+
+        final_token_hash = final_token_hash_obj.hexdigest()
+
+        token_to_store = (final_token_hash, token_salt)
+
+        # fake_id, fake_dir(set to task_id)
+        fake_id = secrets.token_hex(16)
+        fake_dir = task_id[32:]
+
+        expire_time = time.time() + 3600 # TODO
+
+        fq_cur.execute("INSERT INTO ft_queue (task_id, operation, token, fake_id, fake_dir, file_id, expire_time, done) \
+                        VALUES ( ?, ?, ?, ?, ?, ?, ?, 0 );", (task_id, operation, json.dumps(token_to_store),\
+                                                            fake_id, fake_dir, file_id, expire_time))
+        
+        fqueue_db.commit()
+        fqueue_db.close()
+
+        return task_id, token_hash_sha256, fake_id
+
 
     def verifyUserAccess(self, id, action, user: Users):
         """
@@ -416,6 +450,27 @@ class ConnHandler():
             user.load()
             
             self.handle_getPolicy(loaded_recv, user)
+
+        elif loaded_recv["request"] == "getAvatar":
+
+            # 验证 token
+            user = Users(attached_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(attached_token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
+            
+            user.load()
+            
+            self.handle_getAvatar(loaded_recv, user)
+
 
         else:
             self.__send(json.dumps({
@@ -640,7 +695,7 @@ class ConnHandler():
         access_rules = json.loads(fetched[1])
         external_access = json.loads(fetched[2])
 
-        if not self.verifyUserAccess_onPolicy(action, access_rules, external_access, user):
+        if not self._verifyAccess(user, action, access_rules, external_access):
             self.__send(json.dumps({
                 "code": 403,
                 "msg": "forbidden"
@@ -653,32 +708,80 @@ class ConnHandler():
 
         return
 
-    def verifyUserAccess_onPolicy(self, action, access_rules, external_access, user: Users): # 粗暴判断，只是为了调用方便
-        self.log.logger.debug(f"所有访问规则和附加权限记录：{access_rules}, {external_access}")
 
-        if not access_rules: # TODO #7 相同逻辑更新到 verifyUserAccess()
-            return True # fallback
-
-        # access_rules 包括所有规则
-        if user.ifMatchRules(access_rules[action]):
-            return True
+    def handle_getAvatar(self, loaded_recv, user: Users):
+        if not (avatar_username:=loaded_recv["data"].get("username")):
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "needs a username"
+            }))
+            return
         
-        if external_access:
-            for i in external_access["groups"]:
-                if action not in (i_dict:=external_access["groups"][i]).keys():
-                    continue
-                if (not (expire_time:=i_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户组拥有的权限尚未到期
-                    if user.hasGroups((i,)): # 如果用户存在于此用户组
-                        return True
-                    
-            if user.username in external_access["users"].keys(): # 如果用户在字典中有记录
-                if action in (user_action_dict:=external_access["users"][user.username]).keys(): # 如果请求操作在用户的字典中有记录
-                    if (not (expire_time:=user_action_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户拥有的权限尚未到期
-                        return True
-                
-        self.log.logger.debug("校验失败。")
-        return False
+        get_avatar_user = Users(avatar_username, self.db_conn)
 
+        if not get_avatar_user.ifExists():
+            self.log.logger.debug(f"用户 {user.username} 试图请求帐户 {avatar_username} 的头像，但这个用户并不存在。")
+            self.__send(json.dumps(
+                {
+                    "code": 404,
+                    "msg": "not found"
+                }
+            ))
+            return
+
+        avatar_policy = Policies("avatars", self.db_conn)
+        
+        ### TODO #9 增加用户权限对头像获取权限的支持 - done
+
+        gau_access_rules = get_avatar_user["publicity"].get("access_rules", {})
+        gau_external_access = get_avatar_user["publicity"].get("external_access", {})
+
+        if get_avatar_user["publicity"].get("restricted", False):
+            if (not avatar_policy["allow_access_without_permission"])\
+            and (not self._verifyAccess(user, "read", gau_access_rules, gau_external_access))\
+            and (not user.hasRights(("super_useravatar",))):
+                self.__send(json.dumps({
+                    "code": 403,
+                    "msg": "forbidden"
+                }))
+                return
+            
+        if (avatar_file_id:=get_avatar_user["avatar"].get("file_id", None)):
+            task_id, task_token, t_filename = self.createFileTask(avatar_file_id)
+            self.__send(json.dumps({
+                "code": 0,
+                "msg": "ok",
+                "data": {
+                    "task_id": task_id,
+                    "task_token": task_token,
+                    "t_filename": t_filename
+                }
+            }))
+        else:
+            if (default_avatar_id:=avatar_policy["default_avatar"]):
+                task_id, task_token, t_filename = self.createFileTask(default_avatar_id)
+
+                self.log.logger.debug(f"用户 {user.username} 请求帐户 {avatar_username} 的头像，返回为默认头像。")
+
+                self.__send(json.dumps({
+                    "code": 0,
+                    "msg": "ok",
+                    "data": {
+                        "task_id": task_id,
+                        "task_token": task_token,
+                        "t_filename": t_filename
+                    }
+                }))
+            else:
+                self.log.logger.debug(f"用户 {user.username} 试图请求帐户 {avatar_username} 的头像，但用户未设置头像，且策略指定的默认头像为空。")
+                self.__send(json.dumps({
+                    "code": 404,
+                    "msg": "not found",
+                    "data": {}
+                }))
+
+    
+                
 
         
         
@@ -768,7 +871,7 @@ class ConnHandler():
                         "msg": "ok",
                         "data": {
                             "task_id": task_id,
-                            "token": token_hash_sha256, # original hash after sha256
+                            "task_token": token_hash_sha256, # original hash after sha256
                             "expire_time": expire_time,
                             "t_filename": fake_id
                         }

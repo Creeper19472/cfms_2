@@ -257,6 +257,22 @@ while count < 10:
     received = object_conn.recv()
     print("Received: {}".format(received))
 
+    object_conn.send(json.dumps(
+        {
+            "version": 1,
+            "request": "getAvatar",
+            "data": {"username": "admin"},
+            "auth": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
+
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
+
 
 object_conn.send(json.dumps({
     "version": 1,
