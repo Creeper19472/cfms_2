@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = "1.0.0.230712_alpha"
+CORE_VERSION = "1.0.0.230714_alpha"
 
 # import importlib
 
@@ -46,14 +46,14 @@ def dbInit(db_object: DB_Sqlite3):
     """
     # 初始化密码
     # 获取由4位随机大小写字母、数字组成的salt值
-    def create_salt(length = 4):
-        salt = ''
-        chars = string.printable # 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789'
-        len_chars = len(chars) - 1
-        for i in range(0, length):
-            # 每次从chars中随机取一位
-            salt += chars[random.randint(0, len_chars)]
-        return salt
+    # def create_salt(length = 4):
+    #     salt = ''
+    #     chars = string.printable # 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789'
+    #     len_chars = len(chars) - 1
+    #     for i in range(0, length):
+    #         # 每次从chars中随机取一位
+    #         salt += chars[random.randint(0, len_chars)]
+    #     return salt
 
     def create_sha256(pwd, salt):
         first = hashlib.sha256(pwd.encode()).hexdigest()
@@ -63,8 +63,9 @@ def dbInit(db_object: DB_Sqlite3):
 
     # 原始密码
     pwd = '123456'
-    # 随机生成4位salt
-    salt = create_salt()
+    # 随机生成8位salt
+    alphabet = string.ascii_letters + string.digits
+    salt = ''.join(secrets.choice(alphabet) for i in range(8)) # 安全化
     # 加密后的密码
     sha256 = create_sha256(pwd, salt)
 
@@ -138,6 +139,9 @@ def dbInit(db_object: DB_Sqlite3):
     sysop_group_rights = {
         "super_useravatar": {
             "expire": 0
+        },
+        "super_access": {
+            "expire": 0
         }
     }
 
@@ -153,7 +157,11 @@ def dbInit(db_object: DB_Sqlite3):
 
     insert_doc_access_rules = {
         "read": [],
-        "write": []
+        "write": [],
+        "deny": {
+            "read": [],
+            "write": []
+        }
     }
     
 
@@ -259,6 +267,8 @@ def dbInit(db_object: DB_Sqlite3):
 
     from OpenSSL import crypto
 
+    sr_class = secrets.SystemRandom() # create SystemRandom class
+
     ###########
     # CA Cert #
     ###########
@@ -268,7 +278,7 @@ def dbInit(db_object: DB_Sqlite3):
 
     ca_cert = crypto.X509()
     ca_cert.set_version(2)
-    ca_cert.set_serial_number(random.randint(50000000,100000000))
+    ca_cert.set_serial_number(sr_class.randint(50000000,100000000))
 
     ca_subj = ca_cert.get_subject()
     ca_subj.commonName = "CFMS Self CA"
@@ -311,7 +321,7 @@ def dbInit(db_object: DB_Sqlite3):
 
     client_cert = crypto.X509()
     client_cert.set_version(2)
-    client_cert.set_serial_number(random.randint(50000000,100000000))
+    client_cert.set_serial_number(sr_class.randint(50000000,100000000))
 
     client_subj = client_cert.get_subject()
     client_subj.commonName = "CFMS Server self-signed"

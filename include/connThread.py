@@ -218,6 +218,15 @@ class ConnHandler():
     def _verifyAccess(self, user: Users, action, access_rules: dict, external_access: dict):
         if not access_rules: # fix #7
             return True # fallback
+        
+        if user.hasRights(("super_access",)):
+            return True # 放行超级权限，避免管理员被锁定在外
+
+        # 确认是否满足 deny 规则
+        all_deny_rules = access_rules.get("deny", {})
+
+        if user.ifMatchRules(all_deny_rules.get(action, [])):
+            return False
 
         # access_rules 包括所有规则
         if user.ifMatchRules(access_rules[action]):
@@ -269,6 +278,13 @@ class ConnHandler():
         fqueue_db.close()
 
         return task_id, token_hash_sha256, fake_id
+    
+    def filterPathProperties(self, properties: dict):
+        result = properties
+        
+        # TODO #11
+
+        return result
 
 
     def verifyUserAccess(self, id, action, user: Users):
@@ -537,6 +553,9 @@ class ConnHandler():
             })
             )
 
+    def handle_logout(self):
+        pass
+
 
     def handle_refreshToken(self, req_username, old_token):
         user = Users(req_username, self.db_conn) # 初始化用户对象
@@ -643,7 +662,7 @@ class ConnHandler():
                 return
             
 
-            handle_cursor.execute("SELECT id, name, type FROM path_structures WHERE parent_id = ?" , (path_id,))
+            handle_cursor.execute("SELECT id, name, type, properties FROM path_structures WHERE parent_id = ?" , (path_id,))
             all_result = handle_cursor.fetchall()
 
             dir_result = dict()
@@ -655,10 +674,14 @@ class ConnHandler():
                         continue
                     else:
                         pass
+
+                original_properties = json.loads(i[3])
+
                 # print(i)
                 dir_result[i[0]] = {
                     "name": i[1],
-                    "type": i[2]
+                    "type": i[2],
+                    "properties": self.filterPathProperties(original_properties)
                 }
 
             self.__send(json.dumps({
