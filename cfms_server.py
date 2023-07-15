@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = "1.0.0.230714_alpha"
+CORE_VERSION = "1.0.0.230715_alpha"
 
 # import importlib
 
@@ -156,6 +156,26 @@ def dbInit(db_object: DB_Sqlite3):
     # file_id: 如果是文件就必须有；文件夹应该没有
 
     insert_doc_access_rules = {
+        "__noinherit__": [], # 仅当上层启用继承时才有效；deny 设置有特殊格式，deny_ 开头后接 action 表示单独操作的 deny 规则不继承
+        "read": [],
+        "write": [],
+        "deny": {
+            "read": {
+                "groups": {
+                    # "sysop": {
+                    #     "expire": 0
+                    # }
+                },
+                "users": {},
+                "rules": []
+            },
+            "write": {}
+        }
+    }
+
+    insert_dir_access_rules = {
+        "__noinherit__": [], # 仅当上层启用继承时才有效；deny 设置则将导致所有 deny 规则不继承
+        "__subinherit__": True, # 是否被下层所继承，如果为 False，则在判断时将返回为真；仅目录有此设置
         "read": [],
         "write": [],
         "deny": {
@@ -181,8 +201,10 @@ def dbInit(db_object: DB_Sqlite3):
 
 
     insert_paths = (
-        ("C00001", "hello.txt", json.dumps((("user", "admin"),)), "", "file", "0", 
+        ("C00001", "hello.txt", json.dumps((("user", "admin"),)), "dir01", "file", "0", 
          json.dumps(insert_doc_access_rules), json.dumps(insert_doc_external_access), json.dumps({})),
+        ("dir01", "Test Dir", json.dumps((("user", "admin"),)), "", "dir", "0", 
+         json.dumps(insert_dir_access_rules), json.dumps(insert_doc_external_access), json.dumps({})),
     )
     cur.executemany("INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", insert_paths)
 

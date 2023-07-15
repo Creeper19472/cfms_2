@@ -12,7 +12,8 @@
                     }
                 }
             ]
-        }
+        },
+        "deny": {}
     },
     "external_access": {},
     "content": {

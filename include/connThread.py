@@ -37,8 +37,9 @@ class ConnThreads(threading.Thread):
             target_class.main()
         except Exception as e:
             e.add_note("看起来线程内部的运行出现了问题。将关闭到客户端的连接。")
+            target_class.log.logger.fatal(f"{self.name}: 看起来线程内部的运行出现了问题：", exc_info=True)
             target_class.conn.close()
-            raise
+            sys.exit()
 
 class ConnHandler():
     def __init__(self, thread_name, *args, **kwargs): #!!注意，self.thread_name 在调用类定义！
@@ -205,17 +206,27 @@ class ConnHandler():
                 }))
                 continue
 
+            client_api_version = loaded_recv.get("version", None)
+
             # 判断 API 版本
-            if loaded_recv.get("version", None) == 1:
+            if not client_api_version:
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "API version is not given"
+                }))
+                continue
+
+
+            if client_api_version == 1:
                 self.handle_v1(loaded_recv)
             else: # 目前仅支持 V1
                 self.__send(json.dumps({
                     "code": -1,
-                    "msg": "unsupported API version or not given"
+                    "msg": "unsupported API version"
                 }))
                 continue
 
-    def _verifyAccess(self, user: Users, action, access_rules: dict, external_access: dict):
+    def _verifyAccess(self, user: Users, action, access_rules: dict, external_access: dict, check_deny=True):
         if not access_rules: # fix #7
             return True # fallback
         
@@ -223,10 +234,39 @@ class ConnHandler():
             return True # 放行超级权限，避免管理员被锁定在外
 
         # 确认是否满足 deny 规则
-        all_deny_rules = access_rules.get("deny", {})
+        if check_deny:
+            # print(access_rules)
+            all_deny_rules = access_rules.get("deny", {})
 
-        if user.ifMatchRules(all_deny_rules.get(action, [])):
-            return False
+            this_action_deny_value = all_deny_rules.get(action, {})
+            # print(this_action_deny_value)
+
+            this_deny_groups = this_action_deny_value.get("groups", {})
+            this_deny_users = this_action_deny_value.get("users", {})
+            this_deny_rules = this_action_deny_value.get("rules", [])
+
+            _deny_expire_time = None # 置空
+
+            if user.username in this_deny_users:
+                if not (_deny_expire_time:=this_deny_users[user.username].get("expire", 0)): # 如果expire为0
+                    return False
+                if _deny_expire_time > time.time(): # 如果尚未过期
+                    return False
+                
+            _deny_expire_time = None # 置空
+
+            for i in user.groups:
+                if i in this_deny_groups:
+                    if not (_deny_expire_time:=this_deny_groups[i].get("expire", 0)): # 如果expire为0
+                        return False
+                    if _deny_expire_time > time.time(): # 如果尚未过期
+                        return False
+                    
+            del _deny_expire_time
+
+            if this_deny_rules: # 必须存在才会判断
+                if user.ifMatchRules(this_deny_rules):
+                    return False
 
         # access_rules 包括所有规则
         if user.ifMatchRules(access_rules[action]):
@@ -248,10 +288,13 @@ class ConnHandler():
                 
         return False
     
-    def createFileTask(self, file_id, task_id=secrets.token_hex(64), operation="read"):
+    def createFileTask(self, file_id, task_id=None, operation="read"):
         fqueue_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
 
         fq_cur = fqueue_db.cursor()
+
+        if not task_id:
+            task_id = secrets.token_hex(64)
         
         token_hash = secrets.token_hex(64)
         token_salt = secrets.token_hex(16)
@@ -287,7 +330,7 @@ class ConnHandler():
         return result
 
 
-    def verifyUserAccess(self, id, action, user: Users):
+    def verifyUserAccess(self, id, action, user: Users, checkdeny=True, _subcall=False):
         """
         用户鉴权函数。
         用于逐级检查用户是否拥有访问权限，若发生任意无情况即返回 False
@@ -295,7 +338,7 @@ class ConnHandler():
         self.log.logger.debug(f"verifyUserAccess(): 正在对 用户 {user.username} 访问 id: {id} 的请求 进行鉴权")
 
         db_cur = self.db_conn.cursor()
-        db_cur.execute("SELECT parent_id, access_rules, external_access FROM path_structures WHERE id = ?", (id,))
+        db_cur.execute("SELECT parent_id, access_rules, external_access, type FROM path_structures WHERE id = ?", (id,))
 
         result = db_cur.fetchall()
 
@@ -303,29 +346,58 @@ class ConnHandler():
 
         por_policy = Policies("permission_on_rootdir", self.db_conn)
 
-        if (parent:=result[0][0]):
-            self.log.logger.debug(f"正在检查其父目录 {parent} 的权限...")
-            if not self.verifyUserAccess(parent, action, user):
-                return False
-            self.log.logger.debug("完毕，无事发生。")
-        elif por_policy["inherit_by_subdirectory"]:
-            self.log.logger.debug("PoR_IbS 已激活，正在检查用户对于根目录的权限...")
-
-            por_access_rules = por_policy["rules"]["access_rules"]
-            por_external_access = por_policy["rules"]["external_access"]
-
-            if not self._verifyAccess(user, action, por_access_rules, por_external_access):
-                self.log.logger.debug("PoR 鉴权失败")
-                return False
-            else:
-                self.log.logger.debug("PoR 鉴权成功")
-            
         access_rules = json.loads(result[0][1])
         external_access = json.loads(result[0][2])
 
+        if _subcall: # 如果来自子路径调用（这应该表示本路径是一个文件夹）
+            self.log.logger.debug("_subcall 为真")
+
+            if result[0][3] != "dir":
+                raise TypeError("Not a directory: does not support _subcall")
+
+            if not access_rules.get("__subinherit__", True): # 如果设置为下层不继承（对于文件应该无此设置）
+                self.log.logger.debug("本层设置为下层不继承，返回为真")
+                return True
+
+        if not (action in (_noinherit:=access_rules.get("__noinherit__", []))) and not ("all" in _noinherit): # 判断该目录是否继承上层设置
+                
+            if not (f"deny_{action}" in (_noinherit)) \
+                and (not "deny" in _noinherit) and checkdeny:
+                # 1. 本层路径继承上层设置；
+                # 2. 本函数的调用者要求检查 deny；
+                self.log.logger.debug("将检查上级目录的 deny 规则")
+                parent_checkdeny = True
+            else:
+                parent_checkdeny = False
+
+
+            if (parent:=result[0][0]): # 如果仍有父级
+
+                self.log.logger.debug(f"正在检查其父目录 {parent} 的权限...")
+                if not self.verifyUserAccess(parent, action, user, \
+                                            checkdeny = parent_checkdeny, _subcall=True):
+                    return False
+                self.log.logger.debug("完毕，无事发生。")
+
+            elif por_policy["inherit_by_subdirectory"]: # 如果没有父级（是根目录）
+                self.log.logger.debug("PoR_IbS 已激活，正在检查用户对于根目录的权限...")
+
+                por_access_rules = por_policy["rules"]["access_rules"]
+                por_external_access = por_policy["rules"]["external_access"]
+
+                if not self._verifyAccess(user, action, por_access_rules, por_external_access, parent_checkdeny):
+                    self.log.logger.debug("PoR 鉴权失败")
+                    return False
+                else:
+                    self.log.logger.debug("PoR 鉴权成功")
+
+        else:
+            self.log.logger.debug("请求操作在该路径上被设置为不继承上层设置，跳过")
+            
+
         self.log.logger.debug(f"所有访问规则和附加权限记录：{access_rules}, {external_access}")
 
-        if self._verifyAccess(user, action, access_rules, external_access):
+        if self._verifyAccess(user, action, access_rules, external_access, check_deny=checkdeny):
             self.log.logger.debug(f"verifyUserAccess(): 用户 {user.username} 对于 id: {id} 的请求 鉴权成功")
             return True
                 
@@ -844,7 +916,7 @@ class ConnHandler():
 
             if req_action in ["read", "write", "rename", "delete", "permanently_delete", "recover"]:
 
-                if not self.verifyUserAccess(file_id, req_action, user):
+                if not self.verifyUserAccess(file_id, req_action, user, _subcall = False):
                     self.__send(json.dumps({
                         "code": 403,
                         "msg": "permission denied"

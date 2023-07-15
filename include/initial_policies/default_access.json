@@ -22,7 +22,15 @@
                             }
                         ]
                     }
-                ]
+                ],
+                "deny": {
+                    "read": {
+                        "groups": {},
+                        "users": {},
+                        "rules": []
+                    },
+                    "write": {}
+                }
             },
             "external_access": {
                 "groups": {

@@ -197,7 +197,7 @@ while count < 10:
     time.sleep(1)
     # object_conn.send("hello")
     # received = object_conn.recv()
-    print("Received: {}".format(received))
+    # print("Received: {}".format(received))
     object_conn.send(json.dumps(
         {
             "version": 1,
