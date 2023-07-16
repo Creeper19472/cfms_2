@@ -272,6 +272,40 @@ while count < 10:
     received = object_conn.recv()
     print("Received: {}".format(received))
 
+    object_conn.send(json.dumps(
+        {
+            "version": 1,
+            "request": "getRootDir",
+            "data": {},
+            "auth": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
+
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
+    object_conn.send(json.dumps(
+        {
+            "version": 1,
+            "request": "uploadFile",
+            "data": {
+                "directory_id": "",
+                "file_id": "testupload1",
+                # "filename": ""
+            },
+            "auth": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
+
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
 
 
 object_conn.send(json.dumps({

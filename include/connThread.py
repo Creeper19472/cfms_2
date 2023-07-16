@@ -1,5 +1,8 @@
 # connThread.py
 
+from functools import wraps
+import os
+import datetime
 import secrets
 import hashlib
 import threading
@@ -42,6 +45,35 @@ class ConnThreads(threading.Thread):
             sys.exit()
 
 class ConnHandler():
+
+    # 定义经常使用的响应内容
+
+    RES_MISSING_ARGUMENT = {
+        "code": -1,
+        "msg": "missing necessary arguments"
+    }
+
+    RES_ACCESS_DENIED = {
+        "code": 403,
+        "msg": "forbidden"
+    }
+
+    RES_NOT_FOUND = {
+        "code": 404,
+        "msg": "not found"
+    }
+
+    RES_INTERNAL_ERROR = {
+        "code": 500,
+        "msg": "internal server error"
+    }
+
+    RES_OK = {
+        "code": 0,
+        "msg": "ok"
+    }
+
+
     def __init__(self, thread_name, *args, **kwargs): #!!注意，self.thread_name 在调用类定义！
         self.root_abspath = kwargs["root_abspath"]
 
@@ -328,6 +360,12 @@ class ConnHandler():
         # TODO #11
 
         return result
+    
+    def userOperationAuthWrapper(self, func):
+        @wraps(func)
+        def _wrapper():
+            return func
+        return _wrapper
 
 
     def verifyUserAccess(self, id, action, user: Users, checkdeny=True, _subcall=False):
@@ -519,6 +557,26 @@ class ConnHandler():
             
             self.handle_getDir(loaded_recv, user)
 
+        elif loaded_recv["request"] == "getRootDir":
+
+            # 验证 token
+            user = Users(attached_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(attached_token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
+            
+            user.load()
+            
+            self.handle_getRootDir(loaded_recv, user)
+
         elif loaded_recv["request"] == "getPolicy":
 
             # 验证 token
@@ -558,6 +616,28 @@ class ConnHandler():
             user.load()
             
             self.handle_getAvatar(loaded_recv, user)
+
+        elif loaded_recv["request"] == "uploadFile":
+            
+            # TODO #12 重复验证过程加入装饰器
+            
+            # 验证 token
+            user = Users(attached_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(attached_token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
+            
+            user.load()
+
+            self.handle_uploadFile(loaded_recv, user)
 
 
         else:
@@ -701,13 +781,13 @@ class ConnHandler():
 
         handle_cursor = self.db_conn.cursor()
 
-        handle_cursor.execute("SELECT type, access_rules FROM path_structures WHERE id = ?" , (path_id,))
+        handle_cursor.execute("SELECT type, parent_id FROM path_structures WHERE id = ?" , (path_id,))
 
         result = handle_cursor.fetchone()
 
         if result:
             tg_type = result[0]
-            access_rules = json.loads(result[1])
+            parent_id = result[1]
         else:
             self.__send(json.dumps({
                     "code": -1,
@@ -756,6 +836,45 @@ class ConnHandler():
                     "properties": self.filterPathProperties(original_properties)
                 }
 
+            por_policy = Policies("permission_on_rootdir", self.db_conn)
+
+            if parent_id:
+
+                if self.verifyUserAccess(parent_id, "read", user): # 检查是否有权访问父级目录
+                    handle_cursor.execute("SELECT name, type, properties FROM path_structures WHERE parent_id = ?" , (path_id,))
+                    parent_result = handle_cursor.fetchone()
+
+                    parent_properties = json.loads(parent_result[2])
+
+                    assert parent_result[1] == "dir"
+
+                    dir_result[parent_id] = {
+                        "name": parent_result[0],
+                        "type": "dir",
+                        "parent": True,
+                        "properties": self.filterPathProperties(parent_properties)
+                    }
+
+            else: # 如果父级目录是根目录，检查是否有权访问根目录
+                self.log.logger.debug(f"目录 {path_id} 的上级目录为根目录。正在检查用户是否有权访问根目录...")
+
+                por_access_rules = por_policy["rules"]["access_rules"]
+                por_external_access = por_policy["rules"]["external_access"]
+
+                if not self._verifyAccess(user, "read", por_access_rules, por_external_access, True):
+                    self.log.logger.debug("用户无权访问根目录")
+                else:
+                    self.log.logger.debug("根目录鉴权成功")
+
+                    dir_result[""] = {
+                        "name": "<root directory>",
+                        "type": "dir",
+                        "parent": True,
+                        "properties": {}
+                        # "properties": self.filterPathProperties(parent_properties)
+                    }
+
+
             self.__send(json.dumps({
                 "code": 0,
                 "dir_data": dir_result
@@ -767,6 +886,56 @@ class ConnHandler():
                 "code": 500,
                 "msg": "internal server error"
             }))
+
+    def handle_getRootDir(self, loaded_recv, user: Users):
+        por_policy = Policies("permission_on_rootdir", self.db_conn)
+
+        por_access_rules = por_policy["rules"]["access_rules"]
+        por_external_access = por_policy["rules"]["external_access"]
+
+        if not self._verifyAccess(user, "read", por_access_rules, por_external_access, True):
+            self.log.logger.debug("用户无权访问根目录")
+            self.__send(json.dumps({
+                "code": 403,
+                "msg": "forbidden"
+            }))
+            return
+        else:
+            self.log.logger.debug("根目录鉴权成功")
+
+        handle_cursor = self.db_conn.cursor()
+
+        handle_cursor.execute("SELECT id, name, type, properties FROM path_structures WHERE parent_id = ?" , ("",))
+        all_result = handle_cursor.fetchall()
+
+        dir_result = dict()
+
+        for i in all_result:
+
+            if not self.verifyUserAccess(i[0], "read", user): # 检查该目录下的文件是否有权访问，如无则隐藏
+                if self.config["security"]["hide_when_no_access"]:
+                    continue
+                else:
+                    pass
+
+            original_properties = json.loads(i[3])
+
+            # print(i)
+            dir_result[i[0]] = {
+                "name": i[1],
+                "type": i[2],
+                "properties": self.filterPathProperties(original_properties)
+            }
+
+        self.__send(json.dumps({
+                "code": 0,
+                "dir_data": dir_result
+            }))
+        
+        return
+
+
+
 
     def handle_getPolicy(self, loaded_recv, user: Users):
         req_policy_id = loaded_recv["data"]["policy_id"]
@@ -875,6 +1044,137 @@ class ConnHandler():
                     "data": {}
                 }))
 
+    def handle_uploadFile(self, loaded_recv, user: Users):
+
+        if "data" not in loaded_recv:
+            self.__send(json.dumps({
+                self.RES_MISSING_ARGUMENT
+            }))
+
+        target_directory_id = loaded_recv["data"].get("directory_id", "") # fallback to rootdir
+        target_file_path_id = loaded_recv["data"].get("file_id", None)
+        target_filename = loaded_recv["data"].get("filename", f"Untitled-{int(time.time())}")
+
+        if not target_file_path_id:
+            self.__send(json.dumps(
+                self.RES_MISSING_ARGUMENT
+            ))
+            return
+        
+        handle_cursor = self.db_conn.cursor()
+
+        handle_cursor.execute("SELECT * FROM path_structures WHERE id = ?", (target_file_path_id,))
+
+        query_result = handle_cursor.fetchall()
+
+        if query_result:
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "file or directory exists.",
+                "__hint__": "if you want to override a file, use 'operateFile' instead."
+            }))
+            return
+        
+        del query_result # 清除
+
+        if target_directory_id: # 如果不是根目录
+
+            handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (target_directory_id,))
+
+            dir_query_result = handle_cursor.fetchall()
+
+            if not dir_query_result:
+                self.__send(json.dumps({
+                    "code": 404,
+                    "msg": "target directory not found"
+                }))
+                return
+            elif len(dir_query_result) >= 1:
+                raise RuntimeError("数据库出现了不止一条同id的记录")
+            
+            if (d_id_type:=dir_query_result[0][0]) != "dir":
+                self.log.logger.debug(f"用户试图请求在 id 为 {target_directory_id} 的目录下创建文件，\
+                                    但它事实上不是一个目录（{d_id_type}）")
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "not a directory"
+                }))
+                return
+            
+            if not self.verifyUserAccess(target_directory_id, "write", user):
+                self.__send(json.dumps(
+                    self.RES_ACCESS_DENIED
+                ))
+                return
+            
+        else:
+            por_policy = Policies("permission_on_rootdir", self.db_conn)
+
+            por_access_rules = por_policy["rules"]["access_rules"]
+            por_external_access = por_policy["rules"]["external_access"]
+
+            if not self._verifyAccess(user, "write", por_access_rules, por_external_access, True):
+                self.log.logger.debug("用户无权访问根目录")
+                self.__send(self.RES_ACCESS_DENIED)
+                return
+            else:
+                self.log.logger.debug("根目录鉴权成功")
+
+            
+        
+        # 开始创建文件
+
+        index_file_id = secrets.token_hex(64) # 存储在 document_indexes 中
+        real_filename = secrets.token_hex(16)
+
+        today = datetime.date.today()
+
+        destination_path = f"{self.root_abspath}/content/files/{today.year}/{today.month}"
+
+        os.makedirs(destination_path)
+
+        with open(f"{destination_path}/{real_filename}", "w") as new_file:
+            pass
+
+        # 注册数据库条目
+
+        handle_cursor.execute("INSERT INTO document_indexes (id, abspath) VALUES (?, ?)", \
+                              (index_file_id, destination_path+"/"+real_filename))
+        
+        handle_cursor.execute("INSERT INTO path_structures \
+                              (id , name , owner , parent_id , type , file_id , access_rules, external_access, properties) \
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                              (target_file_path_id, target_filename, json.dumps((("user", user.username),)), target_directory_id, 
+                               "file", index_file_id, r"{}", r"{}", json.dumps({
+                                   "created_time": time.time()
+                               }) ))
+        
+        self.db_conn.commit()
+        handle_cursor.close()
+
+        # 创建任务
+        task_id, task_token, t_filename = self.createFileTask(index_file_id, operation="write")
+
+        self.__send(json.dumps({
+            "code": 0,
+            "msg": "file created",
+            "data": {
+                "task_id": task_id,
+                "task_token": task_token,
+                "t_filename": t_filename
+            }
+        }))
+
+        return
+
+
+
+
+
+
+
+
+
     
                 
 
@@ -885,6 +1185,14 @@ class ConnHandler():
         
 
     def handle_operateFile(self, loaded_recv, user: Users):
+        
+        if "data" not in loaded_recv:
+            self.__send(json.dumps({
+                self.RES_MISSING_ARGUMENT
+            }))
+            return
+
+
         file_id = loaded_recv["data"]["file_id"]
 
         handle_cursor = self.db_conn.cursor()
@@ -915,6 +1223,8 @@ class ConnHandler():
             self.log.logger.debug(f"请求对文件的操作：{req_action}")
 
             if req_action in ["read", "write", "rename", "delete", "permanently_delete", "recover"]:
+
+                # 注意：write 操作仅支持覆盖，创建请使用 uploadFile
 
                 if not self.verifyUserAccess(file_id, req_action, user, _subcall = False):
                     self.__send(json.dumps({

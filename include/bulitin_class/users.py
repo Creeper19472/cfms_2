@@ -139,7 +139,7 @@ class Users(object):
         else:
             return False
 
-    def hasRights(self, rights=[]):
+    def hasRights(self, rights=()):
         if not rights: # 若未给定权限名，则返回为真
             return True
         for i in rights:
@@ -147,7 +147,7 @@ class Users(object):
                 return False
         return True
     
-    def hasGroups(self, groups=[]):
+    def hasGroups(self, groups=()):
         if not groups:
             return True
         for i in groups:

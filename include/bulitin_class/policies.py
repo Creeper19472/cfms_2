@@ -3,7 +3,7 @@ import json
 from jsonschema import validate # TODO #8
 
 class Policies(object):
-    def __init__(self, policy_id, sql_object: sqlite3.Connection):
+    def __init__(self, policy_id, sql_object: sqlite3.Connection) -> None:
         self.policy_id = policy_id
 
         # load policy, not refreshable
@@ -35,7 +35,7 @@ class Policies(object):
     def __contains__(self, item):
         return item in self.content
     
-    def save(self):
+    def save(self) -> None:
         self.cursor.execute("UPDATE policies SET content = ?, access_rules = ?, external_access = ? WHERE ID = ?;", \
                             (self.policy_id, self.access_rules, self.external_access))
         return
