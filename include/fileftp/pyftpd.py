@@ -19,6 +19,10 @@ from pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 import logging
 
 class FTPCustomizedHandler(TLS_FTPHandler):
+    def __init__(self, conn, server, ioloop=None):
+        super().__init__(conn, server, ioloop)
+        self.timeout = 120
+
     def handle_timeout(self):
         """Called when client does not send any command within the time
         specified in <timeout> attribute."""
@@ -52,9 +56,24 @@ class FTPCustomizedHandler(TLS_FTPHandler):
         fq_db = sqlite3.connect(f"{ROOT_ABSPATH}/content/fqueue.db")
         fq_cursor = fq_db.cursor()
 
-        # print(type(username))
+        return_code = 0
 
-        fq_cursor.execute("UPDATE ft_queue SET done = 1 WHERE task_id = ?;" , (self.username,))
+        if self.authorizer.operation == "write":
+
+            if os.path.exists(f"{self.authorizer.fake_abspath}/{self.authorizer.fake_file_id}"):
+
+                try:
+                    shutil.copyfile(self.authorizer.fake_abspath+"/"+self.authorizer.fake_file_id, self.authorizer.real_file_path)
+                except Exception as e:
+                    logging.error("在复制文件时出现问题。", exc_info=True)
+                    return_code = -1
+            
+            else: 
+
+                logging.debug("文件上传确已完成，但指定名称的文件并不存在.")
+                return_code = -1
+
+        fq_cursor.execute("UPDATE ft_queue SET done = ? WHERE task_id = ?;" , (return_code, self.username))
 
         fq_db.commit()
         fq_db.close()
@@ -68,6 +87,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
         super().__init__()
 
         self.fake_abspath = None
+        self.operation = None
 
     def validate_authentication(self, username, password, handler):
 
@@ -109,7 +129,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
         if_done, expire_time, operation = fq_cursor.fetchone()
 
-        if if_done:
+        if if_done != 0: # 可能存在的情况：0 - 未完成，1 - 已完成，-1 - 出现错误，-2 - 任务被取消 
             raise AuthenticationFailed # if a task is done, this account will not be able to access again
         
         if expire_time and (expire_time < time.time()):
@@ -123,6 +143,8 @@ class DummyMD5Authorizer(DummyAuthorizer):
                 self.add_user(username, hash)
             else:
                 raise ValueError("Unsupported operation type")
+            
+            self.operation = operation
 
     def add_user(self, username, password, perm='elr', msg_login="Login successful.", msg_quit="Goodbye."):
         if self.has_user(username):
@@ -166,8 +188,16 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
         if real_file_path:
 
-            if not os.path.isfile(f"{self.fake_abspath}/{fake_id}"): # slow
-                shutil.copyfile(real_file_path, f"{self.fake_abspath}/{fake_id}")
+            self.real_file_path = real_file_path # 准备 override
+            self.fake_file_id = fake_id
+
+            if self.operation == "read":
+
+                if not os.path.isfile(f"{self.fake_abspath}/{fake_id}"): # slow
+                    shutil.copyfile(real_file_path, f"{self.fake_abspath}/{fake_id}")
+
+        else:
+            raise sqlite3.DatabaseError("document_indexes 应当记录文件的绝对路径，但它为空")
 
         return self.fake_abspath
 

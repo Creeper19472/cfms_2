@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = "1.0.0.230716_alpha"
+CORE_VERSION = "1.0.0.230718_alpha"
 
 # import importlib
 
@@ -142,6 +142,12 @@ def dbInit(db_object: DB_Sqlite3):
         },
         "super_access": {
             "expire": 0
+        },
+        "view_deleted": {
+            "expire": 0
+        },
+        "permanently_delete": {
+            "expire": 0
         }
     }
 
@@ -152,7 +158,9 @@ def dbInit(db_object: DB_Sqlite3):
     cur.executemany("INSERT INTO groups VALUES(?, ?, ?, ?, ?)", insert_groups)
 
     # 新建伪路径索引定义表
-    cur.execute("CREATE TABLE path_structures(id TEXT, name TEXT, owner TEXT, parent_id TEXT, type TEXT, file_id TEXT, access_rules BLOB, external_access BLOB, properties BLOB)")
+    cur.execute("CREATE TABLE path_structures\
+                (id TEXT, name TEXT, owner TEXT, parent_id TEXT, type TEXT, file_id TEXT, \
+                access_rules BLOB, external_access BLOB, properties BLOB, state TEXT)")
     # file_id: 如果是文件就必须有；文件夹应该没有
 
     insert_doc_access_rules = {
@@ -199,14 +207,19 @@ def dbInit(db_object: DB_Sqlite3):
         "users": {}
     }
 
+    insert_doc_state = {
+        "code": "ok",
+        "expire_time": 0
+    }
+
 
     insert_paths = (
         ("C00001", "hello.txt", json.dumps((("user", "admin"),)), "dir01", "file", "0", 
-         json.dumps(insert_doc_access_rules), json.dumps(insert_doc_external_access), json.dumps({})),
+         json.dumps(insert_doc_access_rules), json.dumps(insert_doc_external_access), json.dumps({}), json.dumps(insert_doc_state)),
         ("dir01", "Test Dir", json.dumps((("user", "admin"),)), "", "dir", "0", 
-         json.dumps(insert_dir_access_rules), json.dumps(insert_doc_external_access), json.dumps({})),
+         json.dumps(insert_dir_access_rules), json.dumps(insert_doc_external_access), json.dumps({}), json.dumps(insert_doc_state))
     )
-    cur.executemany("INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", insert_paths)
+    cur.executemany("INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", insert_paths)
 
     # create config table(internal)
     cur.execute("CREATE TABLE cfms_internal(id TEXT, key TEXT, value BLOB)")

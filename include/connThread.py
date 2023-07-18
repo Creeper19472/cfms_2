@@ -5,6 +5,7 @@ import os
 import datetime
 import secrets
 import hashlib
+import string
 import threading
 import time
 import gettext
@@ -21,8 +22,12 @@ import base64
 import sqlite3
 
 from include.bulitin_class.users import Users
-from include.bulitin_class.documents import Documents
+from include.bulitin_class._documents import Documents # 已弃用
 from include.bulitin_class.policies import Policies
+
+class PendingWriteFileError(Exception):
+    pass
+
 
 class ConnThreads(threading.Thread):
     def __init__(self, target, name, args=(), kwargs={}):
@@ -320,13 +325,16 @@ class ConnHandler():
                 
         return False
     
-    def createFileTask(self, file_id, task_id=None, operation="read"):
+    def createFileTask(self, file_id, task_id=None, operation="read", expire_time=None, force_write=False):
         fqueue_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
 
         fq_cur = fqueue_db.cursor()
 
         if not task_id:
             task_id = secrets.token_hex(64)
+
+        if expire_time == None:
+            expire_time = time.time() + 3600 # by default
         
         token_hash = secrets.token_hex(64)
         token_salt = secrets.token_hex(16)
@@ -343,7 +351,12 @@ class ConnHandler():
         fake_id = secrets.token_hex(16)
         fake_dir = task_id[32:]
 
-        expire_time = time.time() + 3600 # TODO
+        if operation == "write":
+            fq_cur.execute('SELECT * FROM ft_queue WHERE file_id = ? AND operation = "write" AND done = 0;', (file_id, ))
+            query_result = fq_cur.fetchall()
+
+            if query_result and not force_write:
+                raise PendingWriteFileError("文件存在一需要写入的任务，且该任务尚未完成")
 
         fq_cur.execute("INSERT INTO ft_queue (task_id, operation, token, fake_id, fake_dir, file_id, expire_time, done) \
                         VALUES ( ?, ?, ?, ?, ?, ?, ?, 0 );", (task_id, operation, json.dumps(token_to_store),\
@@ -352,8 +365,64 @@ class ConnHandler():
         fqueue_db.commit()
         fqueue_db.close()
 
-        return task_id, token_hash_sha256, fake_id
+        return task_id, token_hash_sha256, fake_id, expire_time
     
+    def permanentlyDeleteFile(self, fake_path_id):
+        g_cur = self.db_conn.cursor()
+
+        # 查询文件信息
+
+        g_cur.execute("SELECT type , file_id FROM path_structures WHERE id = ?", (fake_path_id,))
+        query_result = g_cur.fetchall()
+
+        if len(query_result) == 0:
+            raise FileNotFoundError
+        elif len(query_result) > 1:
+            raise ValueError("在查询表 path_structures 时发现不止一条同路径 id 的记录")
+        
+        got_type, index_file_id = query_result[0]
+
+        if got_type != "file":
+            raise TypeError("删除的必须是一个文件")
+        
+        # 查询 document_indexes 表
+
+        g_cur.execute("SELECT abspath FROM document_indexes WHERE id = ?", (index_file_id,))
+
+        index_query_result = g_cur.fetchall()
+
+        if len(index_query_result) == 0:
+            raise FileNotFoundError(f"未发现在 path_structures 中所指定的文件 id '{index_file_id}' 的记录")
+        elif len(index_query_result) > 1:
+            raise ValueError("在查询表 document_indexes 时发现不止一条同 id 的记录")
+        
+        file_abspath = index_query_result[0][0]
+
+        if not file_abspath:
+            raise ValueError("file_abspath 必须有值")
+
+        # 删除表记录
+
+        g_cur.execute("DELETE from document_indexes where id = ?;", (index_file_id,))
+        g_cur.execute("DELETE from path_structures where id = ?;", (fake_path_id,))
+
+        self.db_conn.commit()
+
+        # 移除所有传输任务列表
+
+        fq_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
+        fq_cur = fq_db.cursor()
+
+        fq_cur.execute("DELETE from ft_queue WHERE file_id = ?", (index_file_id,)) #  AND done = 0
+        fq_db.commit()
+        fq_db.close()
+
+        # 删除真实文件
+
+        os.remove(file_abspath)
+
+        return True
+
     def filterPathProperties(self, properties: dict):
         result = properties
         
@@ -506,12 +575,6 @@ class ConnHandler():
             self.log.logger.debug("收到客户端的 refreshToken 请求")
 
             self.handle_refreshToken(attached_username, attached_token)
-        
-        elif loaded_recv["request"] == "getDocument":
-
-            self.log.logger.debug("客户端请求调取文档")
-
-            self.handle_getDocument(loaded_recv, attached_username, attached_token)
 
         elif loaded_recv["request"] == "operateFile":
             
@@ -639,6 +702,28 @@ class ConnHandler():
 
             self.handle_uploadFile(loaded_recv, user)
 
+        elif loaded_recv["request"] == "createUser":
+
+            # 验证 token
+            user = Users(attached_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(attached_token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
+            
+            user.load()
+
+            self.handle_createUser(loaded_recv, user)
+
+
+
 
         else:
             self.__send(json.dumps({
@@ -728,47 +813,6 @@ class ConnHandler():
                 "code": -1,
                 "msg": "invaild token or username"
             }))
-
-    def handle_getDocument(self, recv: dict, req_username, req_token):
-        """
-        a vaild request:
-        {...
-            "data": {
-                "document_id": "..."
-                }
-        }
-        """
-        try:
-            requested_document_id = recv["data"]["document_id"]
-            other_needed_data = recv["data"].get("other_data", dict())
-        except KeyError:
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "bad request"
-            }))
-            return
-
-        
-        doc = Documents(requested_document_id, self.db_conn)
-        doc.load()
-
-        user = Users(req_username, self.db_conn)
-        if not user.ifExists(): # 其实不必验证，但服务端签发时就要小心
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "user does not exist"
-            }))
-            return
-        
-        user.load()
-
-
-        if doc.if_exists:
-            if doc.hasUserMetRequirements(user):
-                self.__send(json.dumps({
-                    "code": 0,
-                    "msg": "developing"
-                }))
 
     def handle_getDir(self, recv, user: object):
         path_id = recv["data"].get("id")
@@ -1023,7 +1067,7 @@ class ConnHandler():
             }))
         else:
             if (default_avatar_id:=avatar_policy["default_avatar"]):
-                task_id, task_token, t_filename = self.createFileTask(default_avatar_id)
+                task_id, task_token, t_filename, expire_time = self.createFileTask(default_avatar_id)
 
                 self.log.logger.debug(f"用户 {user.username} 请求帐户 {avatar_username} 的头像，返回为默认头像。")
 
@@ -1033,7 +1077,8 @@ class ConnHandler():
                     "data": {
                         "task_id": task_id,
                         "task_token": task_token,
-                        "t_filename": t_filename
+                        "t_filename": t_filename,
+                        "expire_time": expire_time
                     }
                 }))
             else:
@@ -1131,7 +1176,7 @@ class ConnHandler():
 
         destination_path = f"{self.root_abspath}/content/files/{today.year}/{today.month}"
 
-        os.makedirs(destination_path)
+        os.makedirs(destination_path, exist_ok=True) # 即使文件夹已存在也加以继续
 
         with open(f"{destination_path}/{real_filename}", "w") as new_file:
             pass
@@ -1142,18 +1187,21 @@ class ConnHandler():
                               (index_file_id, destination_path+"/"+real_filename))
         
         handle_cursor.execute("INSERT INTO path_structures \
-                              (id , name , owner , parent_id , type , file_id , access_rules, external_access, properties) \
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                              (id , name , owner , parent_id , type , file_id , access_rules, external_access, properties, state) \
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                               (target_file_path_id, target_filename, json.dumps((("user", user.username),)), target_directory_id, 
                                "file", index_file_id, r"{}", r"{}", json.dumps({
                                    "created_time": time.time()
+                               }), json.dumps({
+                                   "code": "ok",
+                                   "expire_time": 0
                                }) ))
         
         self.db_conn.commit()
         handle_cursor.close()
 
         # 创建任务
-        task_id, task_token, t_filename = self.createFileTask(index_file_id, operation="write")
+        task_id, task_token, t_filename, expire_time = self.createFileTask(index_file_id, operation="write")
 
         self.__send(json.dumps({
             "code": 0,
@@ -1161,46 +1209,54 @@ class ConnHandler():
             "data": {
                 "task_id": task_id,
                 "task_token": task_token,
-                "t_filename": t_filename
+                "t_filename": t_filename,
+                "expire_time": expire_time
             }
         }))
 
         return
 
-
-
-
-
-
-
-
-
-    
-                
-
-        
-        
-
-
-        
-
     def handle_operateFile(self, loaded_recv, user: Users):
         
         if "data" not in loaded_recv:
-            self.__send(json.dumps({
+            self.__send(json.dumps(
                 self.RES_MISSING_ARGUMENT
-            }))
+            ))
+            return
+        
+        if not loaded_recv["data"].get("action", None):
+            self.__send(json.dumps(
+                self.RES_MISSING_ARGUMENT
+            ))
             return
 
 
-        file_id = loaded_recv["data"]["file_id"]
+        file_id = loaded_recv["data"].get("file_id", None) # 伪路径文件 ID
+        view_deleted = loaded_recv["data"].get("view_deleted", False)
+        
+        if not file_id:
+            self.__send(json.dumps(
+                self.RES_MISSING_ARGUMENT
+            ))
+            return
+        
+        if loaded_recv["data"]["action"] == "recover":
+            view_deleted = True # 若要恢复文件，则必须有权访问被删除的文件
+        
+        if view_deleted: # 如果启用 view_deleted 选项
+            if not user.hasRights(("view_deleted",)):
+                self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                return
 
         handle_cursor = self.db_conn.cursor()
 
-        handle_cursor.execute("SELECT name, parent_id, type, file_id, access_rules, external_access, properties FROM path_structures WHERE id = ?", \
+        handle_cursor.execute("SELECT name, parent_id, type, file_id, access_rules, external_access, properties, state \
+                              FROM path_structures WHERE id = ?", \
                               (file_id,))
         
         result = handle_cursor.fetchall()
+
+        # print(result)
 
         if len(result) > 1:
             raise ValueError("Invaild query result length")
@@ -1211,6 +1267,14 @@ class ConnHandler():
                 }))
             return
         else:
+            if (file_state:=json.loads(result[0][7]))["code"] == "deleted": 
+                # 如下，file_state 不一定是 file 的 state，但由于安全性原因只能先写这个判断
+                if not view_deleted:
+                    self.__send(
+                        json.dumps(self.RES_NOT_FOUND)
+                    )
+                    return
+
             if result[0][2] != "file":
                 self.__send(json.dumps({
                     "code": -1,
@@ -1239,52 +1303,75 @@ class ConnHandler():
                 if req_action == "read":
                     # 权限检查已在上一步完成
 
-                    fqueue_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
-
-                    fq_cur = fqueue_db.cursor()
-
-                    task_id = secrets.token_hex(64)
-                    
-                    token_hash = secrets.token_hex(64)
-                    token_salt = secrets.token_hex(16)
-
-                    operation = "read"
-
-                    token_hash_sha256 = hashlib.sha256(token_hash.encode()).hexdigest()
-                    final_token_hash_obj = hashlib.sha256()
-                    final_token_hash_obj.update((token_hash_sha256+token_salt).encode())
-
-                    final_token_hash = final_token_hash_obj.hexdigest()
-
-                    token_to_store = (final_token_hash, token_salt)
-
-                    # fake_id, fake_dir(set to task_id)
-                    fake_id = secrets.token_hex(64)
-                    fake_dir = task_id
-
-                    expire_time = time.time() + 3600 # TODO
-
-                    fq_cur.execute("INSERT INTO ft_queue (task_id, operation, token, fake_id, fake_dir, file_id, expire_time, done) \
-                                   VALUES ( ?, ?, ?, ?, ?, ?, ?, 0 );", (task_id, operation, json.dumps(token_to_store),\
-                                                                       fake_id, fake_dir, query_file_id, expire_time))
-                    
-                    fqueue_db.commit()
-                    fqueue_db.close()
+                    task_id, task_token, fake_file_id, expire_time = \
+                        self.createFileTask(query_file_id, operation="read", expire_time=time.time()+3600)
 
                     response = {
                         "code": 0,
                         "msg": "ok",
                         "data": {
                             "task_id": task_id,
-                            "task_token": token_hash_sha256, # original hash after sha256
+                            "task_token": task_token, # original hash after sha256
                             "expire_time": expire_time,
-                            "t_filename": fake_id
+                            "t_filename": fake_file_id
                         }
                     }
 
                     self.__send(json.dumps(response))
 
-                    return
+                
+                elif req_action == "write":
+
+                    if file_state_code:=file_state["code"] != "ok":
+                        if file_state_code == "locked":
+                            self.__send(json.dumps({
+                                "code": -1,
+                                "msg": "文件已锁定，请先解锁",
+                                "data": {
+                                    "expire_time": file_state.get("expire_time", 0)
+                                }
+                            }))
+                            
+                        elif file_state_code == "deleted":
+                            self.__send(json.dumps({
+                                "code": -1,
+                                "msg": "文件已被标记为删除，请先恢复",
+                                "data": {
+                                    "expire_time": file_state.get("expire_time", 0)
+                                }
+                            }))
+                            
+                        else:
+                            self.__send(json.dumps({
+                                "code": -1,
+                                "msg": "文件状态异常"
+                            }))
+                            
+                        return
+                    
+                    try:
+                        task_id, task_token, fake_file_id, expire_time = \
+                            self.createFileTask(query_file_id, operation="write", expire_time=time.time()+3600)
+                    except PendingWriteFileError:
+                        self.__send(json.dumps({
+                            "code": -1,
+                            "msg": "文件正在使用中"
+                        }))
+                        return
+
+                    response = {
+                        "code": 0,
+                        "msg": "ok",
+                        "data": {
+                            "task_id": task_id,
+                            "task_token": task_token, # original hash after sha256
+                            "expire_time": expire_time,
+                            "t_filename": fake_file_id # 这个ID是客户端上传文件时应当使用的文件名
+                        }
+                    }
+
+                    self.__send(json.dumps(response))
+
                 
                 elif req_action == "rename":
 
@@ -1297,18 +1384,81 @@ class ConnHandler():
                         }))
                         return
                     
-                    handle_cursor.execute("UPDATE path_structures SET name = ? WHERE id = ?;", (new_filename, query_file_id))
+                    # if file_state_code:=file_state["code"] != "ok":
+                    #     if file_state_code == "locked":
+                    #         self.__send(json.dumps({
+                    #             "code": -1,
+                    #             "msg": "文件已锁定，请先解锁",
+                    #             "data": {
+                    #                 "expire_time": file_state.get("expire_time", 0)
+                    #             }
+                    #         }))
+                            
+                    #     elif file_state_code == "deleted":
+                    #         self.__send(json.dumps({
+                    #             "code": -1,
+                    #             "msg": "文件已被标记为删除，请先恢复",
+                    #             "data": {
+                    #                 "expire_time": file_state.get("expire_time", 0)
+                    #             }
+                    #         }))
+
+                    
+                    handle_cursor.execute("UPDATE path_structures SET name = ? WHERE id = ?;", (new_filename, file_id))
+
+                    self.db_conn.commit()
 
                     self.__send(json.dumps({
                         "code": 0,
                         "msg": "success"
                     }))
 
-                    return
                 
                 elif req_action == "delete":
-                    pass
+                    recycle_policy = Policies("recycle", self.db_conn)
+                    delete_after_marked_time = recycle_policy["deleteAfterMarked"]
 
+                    if file_state["code"] == "deleted":
+                        self.__send(json.dumps({
+                            "code": -1, 
+                            "msg": "文件已被标记为删除"
+                        }))
+                        return
+
+                    new_state = {
+                        "code": "deleted",
+                        "expire_time": time.time()+delete_after_marked_time
+                    }
+
+                    handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(new_state), file_id))
+
+                    self.db_conn.commit()
+
+                    self.__send(json.dumps(self.RES_OK))
+
+                elif req_action == "recover":
+
+                    if file_state["code"] != "deleted":
+                        self.__send(json.dumps({
+                            "code": -1, 
+                            "msg": "文件未被删除"
+                        }))
+                        return
+                    
+                    recovered_state = {
+                        "code": "ok",
+                        "expire_time": 0
+                    }
+
+                    handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(recovered_state), file_id))
+                    self.db_conn.commit()
+
+                    self.__send(json.dumps(self.RES_OK))
+
+                elif req_action == "permanently_delete":
+                    self.permanentlyDeleteFile(file_id)
+
+                    self.__send(json.dumps(self.RES_OK))
 
             else:
                 self.__send(json.dumps({
@@ -1317,6 +1467,65 @@ class ConnHandler():
                     }))
                 self.log.logger.debug("请求的操作不存在。")
                 return
+            
+            self.db_conn.commit() # 统一 commit
+            handle_cursor.close()
+
+    def handle_createUser(self, loaded_recv, user: Users):
+        if "data" not in loaded_recv:
+            self.__send(json.dumps(
+                self.RES_MISSING_ARGUMENT
+            ))
+            return
+        
+        new_usr_username = loaded_recv["data"].get("username", None)
+        new_usr_pwd = loaded_recv["data"].get("password", None)
+
+        if not new_usr_username or not new_usr_pwd:
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+            return
+        
+        if not user.hasRights(("create_user",)):
+            self.__send(json.dumps(self.RES_ACCESS_DENIED))
+            return
+        
+        new_usr_rights = loaded_recv["data"].get("rights", None)
+        new_usr_groups = loaded_recv["data"].get("groups", None)
+
+        auth_policy = Policies("user_auth", self.db_conn)
+
+        if new_usr_groups or new_usr_rights:
+            if not user.hasRights(("custom_new_user_settings")):
+                self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                return
+        
+        if not new_usr_groups: # fallback
+            new_usr_groups = auth_policy["default_new_user_groups"]
+        if not new_usr_rights:
+            new_usr_rights = auth_policy["default_new_user_rights"]
+
+        
+        handle_cursor = self.db_conn.cursor()
+        
+        # 随机生成8位salt
+        alphabet = string.ascii_letters + string.digits
+        salt = ''.join(secrets.choice(alphabet) for i in range(8)) # 安全化
+
+        __first = hashlib.sha256(new_usr_pwd.encode()).hexdigest()
+        __second_obj = hashlib.sha256()
+        __second_obj.update((__first+salt).encode())
+
+        salted_pwd = __second_obj.hexdigest()
+
+        insert_user = (new_usr_username, salted_pwd, salt, new_usr_rights, new_usr_groups, auth_policy["default_new_user_properties"])
+
+        handle_cursor.execute("INSERT INTO users VALUES(?, ?, ?, ?, ?, ?)", insert_user)
+
+        self.db_conn.commit()
+
+        self.__send(json.dumps(self.RES_OK))
+
+        return
                 
 
 

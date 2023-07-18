@@ -198,24 +198,104 @@ while count < 10:
     # object_conn.send("hello")
     # received = object_conn.recv()
     # print("Received: {}".format(received))
-    object_conn.send(json.dumps(
-        {
-            "version": 1,
-            "request": "refreshToken",
-            "auth": {
-                "username": "admin",
-                "token":  token
-            }
-         }
-    ))
-    received = object_conn.recv()
-    print("Received: {}".format(received))
+    # object_conn.send(json.dumps(
+    #     {
+    #         "version": 1,
+    #         "request": "refreshToken",
+    #         "auth": {
+    #             "username": "admin",
+    #             "token":  token
+    #         }
+    #      }
+    # ))
+    # received = object_conn.recv()
+    # print("Received: {}".format(received))
+
+    # object_conn.send(json.dumps(
+    #     {
+    #         "version": 1,
+    #         "request": "getDir",
+    #         "data": {"id": "dir01"},
+    #         "auth": {
+    #             "username": "admin",
+    #             "token":  token
+    #         }
+    #      }
+    # ))
+
+    # received = object_conn.recv()
+    # print("Received: {}".format(received))
+
+    # object_conn.send(json.dumps(
+    #     {
+    #         "version": 1,
+    #         "request": "operateFile",
+    #         "data": {"file_id": "C00001",
+    #                  "action": "read"},
+    #         "auth": {
+    #             "username": "admin",
+    #             "token":  token
+    #         }
+    #      }
+    # ))
+
+    # received = object_conn.recv()
+    # print("Received: {}".format(received))
+
+    # object_conn.send(json.dumps(
+    #     {
+    #         "version": 1,
+    #         "request": "getPolicy",
+    #         "data": {"policy_id": "login_retry"},
+    #         "auth": {
+    #             "username": "admin",
+    #             "token":  token
+    #         }
+    #      }
+    # ))
+
+    # received = object_conn.recv()
+    # print("Received: {}".format(received))
+
+    # object_conn.send(json.dumps(
+    #     {
+    #         "version": 1,
+    #         "request": "getAvatar",
+    #         "data": {"username": "admin"},
+    #         "auth": {
+    #             "username": "admin",
+    #             "token":  token
+    #         }
+    #      }
+    # ))
+
+    # received = object_conn.recv()
+    # print("Received: {}".format(received))
+
+    # object_conn.send(json.dumps(
+    #     {
+    #         "version": 1,
+    #         "request": "getRootDir",
+    #         "data": {},
+    #         "auth": {
+    #             "username": "admin",
+    #             "token":  token
+    #         }
+    #      }
+    # ))
+
+    # received = object_conn.recv()
+    # print("Received: {}".format(received))
 
     object_conn.send(json.dumps(
         {
             "version": 1,
-            "request": "getDir",
-            "data": {"id": "dir01"},
+            "request": "uploadFile",
+            "data": {
+                "directory_id": "",
+                "file_id": "testupload1",
+                # "filename": ""
+            },
             "auth": {
                 "username": "admin",
                 "token":  token
@@ -230,69 +310,46 @@ while count < 10:
         {
             "version": 1,
             "request": "operateFile",
-            "data": {"file_id": "C00001",
-                     "action": "read"},
-            "auth": {
-                "username": "admin",
-                "token":  token
-            }
-         }
-    ))
-
-    received = object_conn.recv()
-    print("Received: {}".format(received))
-
-    object_conn.send(json.dumps(
-        {
-            "version": 1,
-            "request": "getPolicy",
-            "data": {"policy_id": "login_retry"},
-            "auth": {
-                "username": "admin",
-                "token":  token
-            }
-         }
-    ))
-
-    received = object_conn.recv()
-    print("Received: {}".format(received))
-
-    object_conn.send(json.dumps(
-        {
-            "version": 1,
-            "request": "getAvatar",
-            "data": {"username": "admin"},
-            "auth": {
-                "username": "admin",
-                "token":  token
-            }
-         }
-    ))
-
-    received = object_conn.recv()
-    print("Received: {}".format(received))
-
-    object_conn.send(json.dumps(
-        {
-            "version": 1,
-            "request": "getRootDir",
-            "data": {},
-            "auth": {
-                "username": "admin",
-                "token":  token
-            }
-         }
-    ))
-
-    received = object_conn.recv()
-    print("Received: {}".format(received))
-
-    object_conn.send(json.dumps(
-        {
-            "version": 1,
-            "request": "uploadFile",
             "data": {
-                "directory_id": "",
+                "action": "delete",
+                "file_id": "testupload1",
+                # "filename": ""
+            },
+            "auth": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
+
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
+    object_conn.send(json.dumps(
+        {
+            "version": 1,
+            "request": "operateFile",
+            "data": {
+                "action": "recover",
+                "file_id": "testupload1",
+                # "filename": ""
+            },
+            "auth": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
+
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
+    object_conn.send(json.dumps(
+        {
+            "version": 1,
+            "request": "operateFile",
+            "data": {
+                "action": "permanently_delete",
                 "file_id": "testupload1",
                 # "filename": ""
             },
