@@ -5,6 +5,7 @@ import os
 import datetime
 import secrets
 import hashlib
+import socket
 import string
 import threading
 import time
@@ -60,7 +61,7 @@ class ConnHandler():
 
     RES_ACCESS_DENIED = {
         "code": 403,
-        "msg": "forbidden"
+        "msg": "access denied"
     }
 
     RES_NOT_FOUND = {
@@ -78,6 +79,11 @@ class ConnHandler():
         "msg": "ok"
     }
 
+    RES_BAD_REQUEST = {
+        "code": 400,
+        "msg": "bad request"
+    }
+
 
     def __init__(self, thread_name, *args, **kwargs): #!!注意，self.thread_name 在调用类定义！
         self.root_abspath = kwargs["root_abspath"]
@@ -85,6 +91,8 @@ class ConnHandler():
         self.args = args
         self.kwargs = kwargs
         self.thread_name = thread_name
+
+        self.terminate_event = kwargs["terminate_event"]
 
         self.conn = kwargs["conn"]
         self.addr = kwargs["addr"]
@@ -167,9 +175,6 @@ class ConnHandler():
         self.log.logger.debug(f"received decoded message: {decoded}")
         return decoded
 
-    def construct_package():
-        pass
-
     def _doFirstCommunication(self, conn):
         receive = self.__recv()
         if receive == "hello":
@@ -218,7 +223,7 @@ class ConnHandler():
                 }
             )) # 发送成功回答
 
-        while True:
+        while not self.terminate_event.is_set():
             try:
                 recv = self.__recv()
             except ValueError: # Wrong IV, etc.
@@ -262,6 +267,14 @@ class ConnHandler():
                     "msg": "unsupported API version"
                 }))
                 continue
+
+        self.log.logger.debug(f"terminate_event 被激活，正在终止线程 {self.thread_name}...")
+
+        self.log.logger.debug("正在终止与客户端和数据库的连接...")
+        self.conn.close()
+        self.db_conn.close()
+
+        sys.exit()
 
     def _verifyAccess(self, user: Users, action, access_rules: dict, external_access: dict, check_deny=True):
         if not access_rules: # fix #7
@@ -423,12 +436,56 @@ class ConnHandler():
 
         return True
 
+    def getFileSize(self, path_id):
+        g_cur = self.db_conn.cursor()
+
+        g_cur.execute("SELECT type , file_id FROM path_structures WHERE id = ?", (path_id,))
+
+        query_result = g_cur.fetchall()
+
+        if len(query_result) == 0:
+            raise FileNotFoundError
+        elif len(query_result) > 1:
+            raise RuntimeError("在执行 getFileSize 操作时发现数据库出现相同ID的多条记录")
+        
+        this_file_result = query_result[0]
+
+        if this_file_result[0] != "file":
+            raise TypeError
+        
+        index_file_id = this_file_result[1]
+
+        if not index_file_id:
+            raise RuntimeError("意料外的数据库记录")
+        
+        del this_file_result, query_result # 清除
+        
+        g_cur.execute("SELECT abspath FROM document_indexes WHERE id = ?", (index_file_id, ))
+
+        query_result = g_cur.fetchall()
+
+        if len(query_result) == 0:
+            raise FileNotFoundError("在 document_indexes 表中未发现对应的数据")
+        elif len(query_result) > 1:
+            raise RuntimeError("在执行 getFileSize 操作时发现数据库出现相同ID的多条记录")
+
+        this_real_file_result = query_result[0]
+
+        # cleanup
+        g_cur.close()
+
+        return os.path.getsize(this_real_file_result[0])
+        
+
     def filterPathProperties(self, properties: dict):
         result = properties
         
         # TODO #11
 
         return result
+    
+    def filterUserProperties(self, properties: dict):
+        return properties # TODO #11
     
     def userOperationAuthWrapper(self, func):
         @wraps(func)
@@ -722,6 +779,64 @@ class ConnHandler():
 
             self.handle_createUser(loaded_recv, user)
 
+        elif loaded_recv["request"] == "createGroup":
+            # 验证 token
+            user = Users(attached_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(attached_token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
+            
+            user.load()
+
+            self.handle_createGroup(loaded_recv, user)
+
+        elif loaded_recv["request"] == "getUserProperties":
+            
+            # 验证 token
+            user = Users(attached_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(attached_token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
+            
+            user.load()
+
+            self.handle_getUserProperties(loaded_recv, user)
+
+        elif loaded_recv["request"] == "shutdown":
+
+            # 验证 token
+            user = Users(attached_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(attached_token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
+            
+            user.load()
+
+            self.handle_shutdown(loaded_recv, user)
 
 
 
@@ -873,11 +988,16 @@ class ConnHandler():
 
                 original_properties = json.loads(i[3])
 
+                filtered_properties = self.filterPathProperties(original_properties)
+
+                if i[2] == "file":
+                    filtered_properties["size"] = self.getFileSize(i[0])
+
                 # print(i)
                 dir_result[i[0]] = {
                     "name": i[1],
                     "type": i[2],
-                    "properties": self.filterPathProperties(original_properties)
+                    "properties": filtered_properties
                 }
 
             por_policy = Policies("permission_on_rootdir", self.db_conn)
@@ -890,7 +1010,8 @@ class ConnHandler():
 
                     parent_properties = json.loads(parent_result[2])
 
-                    assert parent_result[1] == "dir"
+                    if parent_result[1] != "dir":
+                        raise RuntimeError("父级目录并非一个文件夹")
 
                     dir_result[parent_id] = {
                         "name": parent_result[0],
@@ -964,12 +1085,18 @@ class ConnHandler():
 
             original_properties = json.loads(i[3])
 
+            filtered_properties = self.filterPathProperties(original_properties)
+
+            if i[2] == "file":
+                filtered_properties["size"] = self.getFileSize(i[0])
+
             # print(i)
             dir_result[i[0]] = {
                 "name": i[1],
                 "type": i[2],
-                "properties": self.filterPathProperties(original_properties)
+                "properties": filtered_properties
             }
+
 
         self.__send(json.dumps({
                 "code": 0,
@@ -1326,7 +1453,7 @@ class ConnHandler():
                         if file_state_code == "locked":
                             self.__send(json.dumps({
                                 "code": -1,
-                                "msg": "文件已锁定，请先解锁",
+                                "msg": "file locked",
                                 "data": {
                                     "expire_time": file_state.get("expire_time", 0)
                                 }
@@ -1335,7 +1462,7 @@ class ConnHandler():
                         elif file_state_code == "deleted":
                             self.__send(json.dumps({
                                 "code": -1,
-                                "msg": "文件已被标记为删除，请先恢复",
+                                "msg": "The file has been marked for deletion, please restore it first",
                                 "data": {
                                     "expire_time": file_state.get("expire_time", 0)
                                 }
@@ -1344,7 +1471,7 @@ class ConnHandler():
                         else:
                             self.__send(json.dumps({
                                 "code": -1,
-                                "msg": "文件状态异常"
+                                "msg": "unexpected file status"
                             }))
                             
                         return
@@ -1355,7 +1482,7 @@ class ConnHandler():
                     except PendingWriteFileError:
                         self.__send(json.dumps({
                             "code": -1,
-                            "msg": "文件正在使用中"
+                            "msg": "file already in use"
                         }))
                         return
 
@@ -1421,7 +1548,7 @@ class ConnHandler():
                     if file_state["code"] == "deleted":
                         self.__send(json.dumps({
                             "code": -1, 
-                            "msg": "文件已被标记为删除"
+                            "msg": "The file has been marked for deletion"
                         }))
                         return
 
@@ -1441,7 +1568,7 @@ class ConnHandler():
                     if file_state["code"] != "deleted":
                         self.__send(json.dumps({
                             "code": -1, 
-                            "msg": "文件未被删除"
+                            "msg": "File is not deleted"
                         }))
                         return
                     
@@ -1463,7 +1590,7 @@ class ConnHandler():
             else:
                 self.__send(json.dumps({
                         "code": -1,
-                        "msg": "请求的操作不存在"
+                        "msg": "operation not found"
                     }))
                 self.log.logger.debug("请求的操作不存在。")
                 return
@@ -1489,19 +1616,28 @@ class ConnHandler():
             self.__send(json.dumps(self.RES_ACCESS_DENIED))
             return
         
+        # 判断用户是否存在
+        new_user = Users(new_usr_username, self.db_conn)
+        if new_user.ifExists():
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "user exists"
+            }))
+            return
+        
         new_usr_rights = loaded_recv["data"].get("rights", None)
         new_usr_groups = loaded_recv["data"].get("groups", None)
 
         auth_policy = Policies("user_auth", self.db_conn)
 
-        if new_usr_groups or new_usr_rights:
-            if not user.hasRights(("custom_new_user_settings")):
+        if new_usr_groups!=None or new_usr_rights!=None:
+            if not user.hasRights(("custom_new_user_settings",)):
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
         
-        if not new_usr_groups: # fallback
+        if new_usr_groups == None: # fallback
             new_usr_groups = auth_policy["default_new_user_groups"]
-        if not new_usr_rights:
+        if new_usr_rights == None:
             new_usr_rights = auth_policy["default_new_user_rights"]
 
         
@@ -1517,7 +1653,8 @@ class ConnHandler():
 
         salted_pwd = __second_obj.hexdigest()
 
-        insert_user = (new_usr_username, salted_pwd, salt, new_usr_rights, new_usr_groups, auth_policy["default_new_user_properties"])
+        insert_user = (new_usr_username, salted_pwd, salt, 
+                       json.dumps(new_usr_rights), json.dumps(new_usr_groups), json.dumps(auth_policy["default_new_user_properties"]))
 
         handle_cursor.execute("INSERT INTO users VALUES(?, ?, ?, ?, ?, ?)", insert_user)
 
@@ -1526,8 +1663,163 @@ class ConnHandler():
         self.__send(json.dumps(self.RES_OK))
 
         return
-                
+    
+    def handle_createGroup(self, loaded_recv, user: Users):
+        if "data" not in loaded_recv:
+            self.__send(json.dumps(
+                self.RES_MISSING_ARGUMENT
+            ))
+            return
+        
+        new_group_name = loaded_recv["data"].get("group_name", None)
+        new_group_members = loaded_recv["data"].get("group_members", None)
+        new_group_enabled = loaded_recv["data"].get("enabled", None)
 
+        if not new_group_name:
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+            return
+        
+        if not user.hasRights(("create_group",)):
+            self.__send(json.dumps(self.RES_ACCESS_DENIED))
+            return
+        
+        handle_cursor = self.db_conn.cursor()
+        
+        # 判断组是否存在
+        handle_cursor.execute("SELECT count(name) from groups where name = ?", (new_group_name,))
+        result = handle_cursor.fetchone()
+
+        if result[0] != 0: # 不做过多判断（虽然本该如此）
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "group exists"
+            }))
+            return
+
+        
+        new_group_rights = loaded_recv["data"].get("rights", None)
+
+        group_policy = Policies("group_settings", self.db_conn)
+
+        if new_group_rights != None or new_group_enabled != None: # 不为未提供的，因提供空列表也是一种提交
+            if not user.hasRights(("custom_new_group_settings",)):
+                self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                return
+            
+        if new_group_members != None:
+            if not user.hasRights(("custom_new_group_members",)):
+                self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                return
+        
+        if new_group_rights == None: # fallback
+            new_group_rights = group_policy["default_rights"]
+
+        if new_group_members == None:
+            new_group_members = group_policy["default_members"]
+
+        if new_group_enabled == None:
+            new_group_enabled = group_policy["default_enabled"]
+        elif new_group_enabled != 0 and new_group_enabled != 1:
+            self.__send(json.dumps({
+                "code": 400,
+                "msg": "group_enabled is invaild"
+            }))
+            return
+        
+        
+        # 开始处理
+
+        handle_cursor = self.db_conn.cursor()
+
+        errors = []
+
+        # generate group id (why do I need this?)
+        group_id = secrets.token_hex(16)
+
+        handle_cursor.execute("INSERT INTO groups VALUES(?, ?, ?, ?, ?)",  # 插入新的组
+                              (group_id, new_group_name, new_group_enabled, json.dumps(new_group_rights), json.dumps({})))
+
+        for i in new_group_members:
+            handle_cursor.execute("SELECT groups FROM users WHERE username = ?", (i,))
+            query_result = handle_cursor.fetchone()
+            if not query_result:
+                errors.append((i, "NOT_FOUND"))
+                continue
+            old_groups = json.loads(query_result[0])
+
+            new_groups = old_groups # copy
+            new_groups[new_group_name] = {
+                "expire": 0
+            }
+
+            handle_cursor.execute("UPDATE users SET groups = ? WHERE username = ? ", (json.dumps(new_groups), i))
+
+
+
+        self.db_conn.commit()
+
+        self.__send(json.dumps(self.RES_OK))
+
+        return
+    
+    def handle_shutdown(self, loaded_recv, user: Users):
+        
+        if not user.hasRights(("shutdown",)):
+            self.__send(json.dumps(self.RES_ACCESS_DENIED))
+            return
+        
+        self.terminate_event.set()
+
+        self.__send(json.dumps({
+            "code": 200,
+            "msg": "goodbye"
+        }))
+
+        # 先终止一次连接（可以重复终止）
+        self.conn.close()
+
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        host, port= 'localhost', self.config["connect"]["port"]
+        client_socket.connect((host,port))
+        client_socket.close()
+
+        return
+                
+    def handle_getUserProperties(self, loaded_recv, user: Users):
+        if "data" not in loaded_recv:
+            self.__send(json.dumps(
+                self.RES_MISSING_ARGUMENT
+            ))
+            return
+        
+        target_username = loaded_recv["data"].get("username", user.username)
+
+        if not target_username:
+            target_username = user.username # fallback to whoami
+
+        if target_username != user.username:
+            if not user.hasRights(("view_others_properties",)):
+                self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                return
+            
+            query_user_object = Users(target_username, self.db_conn)
+            if not query_user_object.ifExists():
+                self.__send(json.dumps(self.RES_NOT_FOUND))
+                return
+        
+        else:
+            query_user_object = user
+
+        response = {
+            "rights": list(query_user_object.rights),
+            "groups": list(query_user_object.groups),
+            "properties": query_user_object.properties
+        }
+
+        self.__send(json.dumps(response))
+        return
+
+        
 
         
             

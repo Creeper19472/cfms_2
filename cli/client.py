@@ -272,20 +272,20 @@ while count < 10:
     # received = object_conn.recv()
     # print("Received: {}".format(received))
 
-    # object_conn.send(json.dumps(
-    #     {
-    #         "version": 1,
-    #         "request": "getRootDir",
-    #         "data": {},
-    #         "auth": {
-    #             "username": "admin",
-    #             "token":  token
-    #         }
-    #      }
-    # ))
+    object_conn.send(json.dumps(
+        {
+            "version": 1,
+            "request": "getRootDir",
+            "data": {},
+            "auth": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
 
-    # received = object_conn.recv()
-    # print("Received: {}".format(received))
+    received = object_conn.recv()
+    print("Received: {}".format(received))
 
     object_conn.send(json.dumps(
         {
@@ -311,9 +311,81 @@ while count < 10:
             "version": 1,
             "request": "operateFile",
             "data": {
-                "action": "delete",
+                "action": "write",
                 "file_id": "testupload1",
                 # "filename": ""
+            },
+            "auth": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
+
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
+    # object_conn.send(json.dumps(
+    #     {
+    #         "version": 1,
+    #         "request": "operateFile",
+    #         "data": {
+    #             "action": "recover",
+    #             "file_id": "testupload1",
+    #             # "filename": ""
+    #         },
+    #         "auth": {
+    #             "username": "admin",
+    #             "token":  token
+    #         }
+    #      }
+    # ))
+
+    # received = object_conn.recv()
+    # print("Received: {}".format(received))
+
+    # object_conn.send(json.dumps(
+    #     {
+    #         "version": 1,
+    #         "request": "operateFile",
+    #         "data": {
+    #             "action": "permanently_delete",
+    #             "file_id": "testupload1",
+    #             # "filename": ""
+    #         },
+    #         "auth": {
+    #             "username": "admin",
+    #             "token":  token
+    #         }
+    #      }
+    # ))
+
+    # received = object_conn.recv()
+    # print("Received: {}".format(received))
+
+    # object_conn.send(json.dumps(
+    #     {
+    #         "version": 1,
+    #         "request": "shutdown",
+    #         "data": {
+    #         },
+    #         "auth": {
+    #             "username": "admin",
+    #             "token":  token
+    #         }
+    #      }
+    # ))
+
+    # received = object_conn.recv()
+    # print("Received: {}".format(received))
+
+    object_conn.send(json.dumps(
+        {
+            "version": 1,
+            "request": "createUser",
+            "data": {
+                "username": "testuser",
+                "password": "123456"
             },
             "auth": {
                 "username": "admin",
@@ -328,11 +400,15 @@ while count < 10:
     object_conn.send(json.dumps(
         {
             "version": 1,
-            "request": "operateFile",
+            "request": "createGroup",
             "data": {
-                "action": "recover",
-                "file_id": "testupload1",
-                # "filename": ""
+                "group_name": "testusergroup",
+                "rights": {
+                    "permanently_delete": {
+                        "expire": 0
+                    }
+                },
+                "members": ["admin"]
             },
             "auth": {
                 "username": "admin",
@@ -347,11 +423,9 @@ while count < 10:
     object_conn.send(json.dumps(
         {
             "version": 1,
-            "request": "operateFile",
+            "request": "getUserProperties",
             "data": {
-                "action": "permanently_delete",
-                "file_id": "testupload1",
-                # "filename": ""
+                "username": "guest"
             },
             "auth": {
                 "username": "admin",

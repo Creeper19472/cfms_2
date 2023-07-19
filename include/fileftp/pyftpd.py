@@ -1,4 +1,5 @@
 import multiprocessing
+import threading
 import time
 
 from pyftpdlib.handlers import FTPHandler
@@ -203,7 +204,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
 
 
-def main(root_abspath, port=5104):
+def main(root_abspath, shutdown_event: threading.Event, port=5104):
     global ROOT_ABSPATH
     ROOT_ABSPATH = root_abspath
 
@@ -237,7 +238,15 @@ def main(root_abspath, port=5104):
 
     logging.basicConfig(handlers=(lfhandler, cshandler), level=logging.DEBUG)
 
-    server.serve_forever()
+    while not shutdown_event.is_set():
+        server.serve_forever(blocking=False)
+
+    logging.info(
+        ">>> shutting down FTP server (%s active workers) <<<",
+        server._map_len())
+    
+    server.close_all()
+    sys.exit()
 
 if __name__ == "__main__":
-    main("B:\crp9472_personal\cfms_2") #TODO
+    main("B:\crp9472_personal\cfms_2", shutdown_event=threading.Event()) #TODO

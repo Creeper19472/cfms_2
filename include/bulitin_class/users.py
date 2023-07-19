@@ -1,5 +1,6 @@
 # builtin_class/Users.py
 
+import secrets
 import sqlite3
 import hashlib
 import jwt
@@ -93,7 +94,7 @@ class Users(object):
         # 初始化sha256对象
         sha256_obj = hashlib.sha256()
         sha256_obj.update((given+salt).encode())
-        if hash == sha256_obj.hexdigest():
+        if secrets.compare_digest(hash, sha256_obj.hexdigest()):
             return True
         else:
             return False

@@ -1,6 +1,8 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = "1.0.0.230718_alpha"
+CORE_VERSION = (1, 0, 0, "230719_alpha")
+READABLE_VERSION = f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
+
 
 # import importlib
 
@@ -19,6 +21,10 @@ import include.fileftp.pyftpd as pyftpd
 
 import secrets
 import string
+
+# 初始化 terminate_event
+terminate_event = threading.Event()
+
 
 class DB_Sqlite3(object):
     def __init__(self, filename):
@@ -148,7 +154,16 @@ def dbInit(db_object: DB_Sqlite3):
         },
         "permanently_delete": {
             "expire": 0
-        }
+        },
+        "shutdown": {
+            "expire": 0
+        },
+        "create_user": {},
+        "custom_new_user_settings": {},
+        "create_group" : {},
+        "custom_new_group_settings": {},
+        "custom_new_group_members": {},
+        "view_others_properties": {}
     }
 
     insert_groups = (
@@ -223,7 +238,7 @@ def dbInit(db_object: DB_Sqlite3):
 
     # create config table(internal)
     cur.execute("CREATE TABLE cfms_internal(id TEXT, key TEXT, value BLOB)")
-    cur.execute("INSERT INTO cfms_internal VALUES(?, ?, ?)", (0, "db_version", CORE_VERSION))
+    cur.execute("INSERT INTO cfms_internal VALUES(?, ?, ?)", (0, "db_version", READABLE_VERSION))
 
     # create policy table
     log.logger.debug("正在创建策略表。")
@@ -390,12 +405,16 @@ def dbInit(db_object: DB_Sqlite3):
     with open(f"{root_abspath}/content/auth/ftp_client.key", "wt") as f:
         f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, client_key).decode())
 
-sock_condition = True
+# sock_condition = True
 
 def mainloop(serverd):
     created_count = 0
 
-    while sock_condition:
+    # consoledThread = threading.Thread(target=consoled,name="consoled")
+    # consoledThread.daemon = True # 解决不退出问题
+    # consoledThread.start()
+
+    while not terminate_event.is_set():
         # 建立客户端连接
 
         created_count += 1
@@ -417,22 +436,44 @@ def mainloop(serverd):
                 "addr": addr,
                 "db_conn": maindb.conn,
                 "toml_config": config,
-                "root_abspath": root_abspath
+                "root_abspath": root_abspath,
+                "terminate_event": terminate_event
             }
         )
         Thread.daemon = True
         Thread.start()
 
+    # 开始收尾工作
+    log.logger.info("终止信号被激活，正在终止服务...")
+    # terminate_event.set()
+
+    wait_timeout = time.time() + config["exit"]["wait_sec"]
+    
+    while time.time() < wait_timeout:
+        time.sleep(0.2)
+
+        alive_threads = threading.enumerate()
+
+        log.logger.debug(f"目前剩余的线程有：{alive_threads}")
+        if len(threading.enumerate()) <= 2: # 如果线程只有两个（主线程和 mainloop 必定在结果内）
+            break
+
+        log.logger.debug(f"等待 0.2s, 直到线程退出完毕 ... 超时时间：{wait_timeout}")
+
+    log.logger.debug("正在退出 mainloop.")
+    sys.exit()
+
 
 def stopsocket():
     # socket终止
-    globals()['sock_condition'] = False
+    terminate_event.set()
     with open("config.toml", "rb") as f:
         config = tomllib.load(f)
     clientsocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     host, port= 'localhost',config["connect"]["port"]
     clientsocket.connect((host,port))
     clientsocket.close()
+
     sys.exit()
 
 
@@ -481,9 +522,9 @@ if __name__ == "__main__":
 
     log.logger.info("Starting Classified File Management System - Server...")
     # log.logger.info(f"Server time:{starttime}")    
-    log.logger.info(f"Version {CORE_VERSION}")
+    log.logger.info(f"Version {READABLE_VERSION}")
     log.logger.info("Running On: Python %s" % sys.version)
-    if sys.version_info[0] < 3: # 基于Python 3.11 开发，因此低于此版本就无法运行
+    if sys.version_info < (3, 11): # 基于Python 3.11 开发，因此低于此版本就无法运行
         log.logger.fatal("您正在运行的 Python 版本低于本系统的最低要求。")
         log.logger.fatal("由于此原因，程序无法继续。")
         sys.exit()
@@ -538,21 +579,14 @@ if __name__ == "__main__":
     mainloopThread = threading.Thread(target=lambda:mainloop(server),name="mainloop")
     mainloopThread.start()
 
-    # consoledThread = threading.Thread(target=consoled,name="consoled")
-    # consoledThread.start()
-
-    # # 初始化 FileServer
-    # fileServerThread = threading.Thread(target=ftserver.__main__, \
-    #                                     args=(ipv4_addr[0], config["connect"]["file_cmd_port"], config["connect"]["file_data_port"], root_abspath,),\
-    #                                     name="fileServerThread")
-    # fileServerThread.daemon = False
-    # fileServerThread.start()
-
     # 初始化 FTPServer
+    log.logger.info(f'正在初始化 FTP 服务... 端口开放在 {config["connect"]["ftp_port"]}.')
     FTPServerThread = threading.Thread(target=pyftpd.main, \
-                                        args=(root_abspath, config["connect"]["ftp_port"]),\
+                                        args=(root_abspath, terminate_event, config["connect"]["ftp_port"]),\
                                         name="FTPServerThread")
-    FTPServerThread.daemon = False
     FTPServerThread.start()
+
+    endtime = time.time()
+    log.logger.info(f"完成（{endtime - starttime} s）！")
 
 

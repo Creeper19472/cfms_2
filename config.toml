@@ -39,3 +39,6 @@ db_name = "general.db"
 
 [debug]
 debug = true
+
+[exit]
+wait_sec = 3
