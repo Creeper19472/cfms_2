@@ -80,7 +80,7 @@ pre {
         <div class="metrics-title">
             Metrics:<br>
         </div>
-        Total lines of code: <span id="loc">2828</span><br>
+        Total lines of code: <span id="loc">3704</span><br>
         Total lines skipped (#nosec): <span id="nosec">0</span>
     </div>
 </div>
@@ -99,14 +99,14 @@ pre {
     <b>Confidence: </b>HIGH<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/327.html" target="_blank">CWE-327</a><br>
     <b>File: </b><a href="./cfms_server.py" target="_blank">./cfms_server.py</a><br>
-    <b>Line number: </b>15<br>
+    <b>Line number: </b>17<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto" target="_blank">https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto</a><br>
 
 <div class="code">
 <pre>
-14	from include.connThread import * 
-15	from Crypto.PublicKey import RSA
-16	
+16	from include.connThread import * 
+17	from Crypto.PublicKey import RSA
+18	
 </pre>
 </div>
 
@@ -122,14 +122,14 @@ pre {
     <b>Confidence: </b>MEDIUM<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/259.html" target="_blank">CWE-259</a><br>
     <b>File: </b><a href="./cfms_server.py" target="_blank">./cfms_server.py</a><br>
-    <b>Line number: </b>65<br>
+    <b>Line number: </b>71<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/plugins/b105_hardcoded_password_string.html" target="_blank">https://bandit.readthedocs.io/en/1.7.5/plugins/b105_hardcoded_password_string.html</a><br>
 
 <div class="code">
 <pre>
-64	    # 原始密码
-65	    pwd = &#x27;123456&#x27;
-66	    # 随机生成8位salt
+70	    # 原始密码
+71	    pwd = &#x27;123456&#x27;
+72	    # 随机生成8位salt
 </pre>
 </div>
 
@@ -283,14 +283,14 @@ pre {
     <b>Confidence: </b>HIGH<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/327.html" target="_blank">CWE-327</a><br>
     <b>File: </b><a href="./include\connThread.py" target="_blank">./include\connThread.py</a><br>
-    <b>Line number: </b>11<br>
+    <b>Line number: </b>16<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto" target="_blank">https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto</a><br>
 
 <div class="code">
 <pre>
-10	
-11	from Crypto.PublicKey import RSA
-12	from Crypto.Cipher import PKCS1_OAEP
+15	
+16	from Crypto.PublicKey import RSA
+17	from Crypto.Cipher import PKCS1_OAEP
 </pre>
 </div>
 
@@ -306,14 +306,14 @@ pre {
     <b>Confidence: </b>HIGH<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/327.html" target="_blank">CWE-327</a><br>
     <b>File: </b><a href="./include\connThread.py" target="_blank">./include\connThread.py</a><br>
-    <b>Line number: </b>12<br>
+    <b>Line number: </b>17<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto" target="_blank">https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto</a><br>
 
 <div class="code">
 <pre>
-11	from Crypto.PublicKey import RSA
-12	from Crypto.Cipher import PKCS1_OAEP
-13	
+16	from Crypto.PublicKey import RSA
+17	from Crypto.Cipher import PKCS1_OAEP
+18	
 </pre>
 </div>
 
@@ -329,14 +329,14 @@ pre {
     <b>Confidence: </b>HIGH<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/327.html" target="_blank">CWE-327</a><br>
     <b>File: </b><a href="./include\connThread.py" target="_blank">./include\connThread.py</a><br>
-    <b>Line number: </b>14<br>
+    <b>Line number: </b>19<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto" target="_blank">https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto</a><br>
 
 <div class="code">
 <pre>
-13	
-14	from Crypto.Cipher import AES
-15	from Crypto.Util.Padding import pad, unpad
+18	
+19	from Crypto.Cipher import AES
+20	from Crypto.Util.Padding import pad, unpad
 </pre>
 </div>
 
@@ -352,14 +352,14 @@ pre {
     <b>Confidence: </b>HIGH<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/327.html" target="_blank">CWE-327</a><br>
     <b>File: </b><a href="./include\connThread.py" target="_blank">./include\connThread.py</a><br>
-    <b>Line number: </b>15<br>
+    <b>Line number: </b>20<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto" target="_blank">https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto</a><br>
 
 <div class="code">
 <pre>
-14	from Crypto.Cipher import AES
-15	from Crypto.Util.Padding import pad, unpad
-16	
+19	from Crypto.Cipher import AES
+20	from Crypto.Util.Padding import pad, unpad
+21	
 </pre>
 </div>
 
@@ -375,14 +375,14 @@ pre {
     <b>Confidence: </b>HIGH<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/703.html" target="_blank">CWE-703</a><br>
     <b>File: </b><a href="./include\connThread.py" target="_blank">./include\connThread.py</a><br>
-    <b>Line number: </b>252<br>
+    <b>Line number: </b>509<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/plugins/b101_assert_used.html" target="_blank">https://bandit.readthedocs.io/en/1.7.5/plugins/b101_assert_used.html</a><br>
 
 <div class="code">
 <pre>
-251	
-252	        assert len(result) == 1
-253	
+508	
+509	        assert len(result) == 1
+510	
 </pre>
 </div>
 
@@ -582,7 +582,7 @@ pre {
     <b>Severity: </b>HIGH<br>
     <b>Confidence: </b>HIGH<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/327.html" target="_blank">CWE-327</a><br>
-    <b>File: </b><a href="./include\test\aes.py" target="_blank">./include\test\aes.py</a><br>
+    <b>File: </b><a href="./include\test\test_aes.py" target="_blank">./include\test\test_aes.py</a><br>
     <b>Line number: </b>1<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto" target="_blank">https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto</a><br>
 
@@ -605,7 +605,7 @@ pre {
     <b>Severity: </b>HIGH<br>
     <b>Confidence: </b>HIGH<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/327.html" target="_blank">CWE-327</a><br>
-    <b>File: </b><a href="./include\test\aes.py" target="_blank">./include\test\aes.py</a><br>
+    <b>File: </b><a href="./include\test\test_aes.py" target="_blank">./include\test\test_aes.py</a><br>
     <b>Line number: </b>3<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto" target="_blank">https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto</a><br>
 
@@ -628,7 +628,7 @@ pre {
     <b>Severity: </b>HIGH<br>
     <b>Confidence: </b>HIGH<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/327.html" target="_blank">CWE-327</a><br>
-    <b>File: </b><a href="./include\test\aes.py" target="_blank">./include\test\aes.py</a><br>
+    <b>File: </b><a href="./include\test\test_aes.py" target="_blank">./include\test\test_aes.py</a><br>
     <b>Line number: </b>5<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto" target="_blank">https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_imports.html#b413-import-pycrypto</a><br>
 
@@ -651,7 +651,7 @@ pre {
     <b>Severity: </b>LOW<br>
     <b>Confidence: </b>HIGH<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/330.html" target="_blank">CWE-330</a><br>
-    <b>File: </b><a href="./include\test\ssl2.py" target="_blank">./include\test\ssl2.py</a><br>
+    <b>File: </b><a href="./include\test\test_ssl2.py" target="_blank">./include\test\test_ssl2.py</a><br>
     <b>Line number: </b>18<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_calls.html#b311-random" target="_blank">https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_calls.html#b311-random</a><br>
 
@@ -674,7 +674,7 @@ pre {
     <b>Severity: </b>LOW<br>
     <b>Confidence: </b>HIGH<br>
     <b>CWE: </b><a href="https://cwe.mitre.org/data/definitions/330.html" target="_blank">CWE-330</a><br>
-    <b>File: </b><a href="./include\test\ssl2.py" target="_blank">./include\test\ssl2.py</a><br>
+    <b>File: </b><a href="./include\test\test_ssl2.py" target="_blank">./include\test\test_ssl2.py</a><br>
     <b>Line number: </b>61<br>
     <b>More info: </b><a href="https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_calls.html#b311-random" target="_blank">https://bandit.readthedocs.io/en/1.7.5/blacklists/blacklist_calls.html#b311-random</a><br>
 

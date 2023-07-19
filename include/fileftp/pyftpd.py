@@ -121,7 +121,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
         # print(sha256_obj.hexdigest())
 
         try:
-            if hash != sha256_obj.hexdigest():
+            if not secrets.compare_digest(hash, sha256_obj.hexdigest()): # hash != sha256_obj.hexdigest():
                 raise KeyError
         except KeyError:
             raise AuthenticationFailed

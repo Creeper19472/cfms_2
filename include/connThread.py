@@ -97,6 +97,10 @@ class ConnHandler():
         self.conn = kwargs["conn"]
         self.addr = kwargs["addr"]
 
+        # 用于装饰器
+        self.this_time_token = None
+        self.this_time_username = None
+
         self.db_conn = sqlite3.connect(f"{self.root_abspath}/general.db")
 
         self.config = kwargs["toml_config"] # 导入配置字典
@@ -487,10 +491,34 @@ class ConnHandler():
     def filterUserProperties(self, properties: dict):
         return properties # TODO #11
     
-    def userOperationAuthWrapper(self, func):
+    def userOperationAuthWrapper(func):
+
         @wraps(func)
-        def _wrapper():
-            return func
+        def _wrapper(self, *args, **kwargs):
+
+            ### 通用用户令牌鉴权开始
+            
+            # 验证 token
+
+            user = Users(self.this_time_username, self.db_conn)
+
+            # 读取 token_secret
+            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
+
+            if not user.ifVaildToken(self.this_time_token, token_secret):
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "invaild token or username"
+                }))
+                return
+            
+            user.load()
+
+            ### 结束
+            
+            func(self, *args, **kwargs, user=user) # 仅当上述操作成功该函数才会被执行
+    
         return _wrapper
 
 
@@ -617,6 +645,8 @@ class ConnHandler():
         try:
             attached_token = loaded_recv["auth"]["token"]
             attached_username = loaded_recv["auth"]["username"]
+            self.this_time_token = attached_token
+            self.this_time_username = attached_username
         except KeyError:
             self.log.logger.debug("请求无效：认证数据不完整或缺失")
             self.__send(json.dumps({
@@ -635,209 +665,43 @@ class ConnHandler():
 
         elif loaded_recv["request"] == "operateFile":
             
-            ### 通用用户令牌鉴权开始
-            
-            # 验证 token
-            user = Users(attached_username, self.db_conn)
-
-            # 读取 token_secret
-            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                token_secret = ts_file.read()
-
-            if not user.ifVaildToken(attached_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
-                return
-            
-            user.load()
-
-            ### 结束
-
-            self.handle_operateFile(loaded_recv, user)
+            self.handle_operateFile(loaded_recv)
 
         elif loaded_recv["request"] == "getDir":
             
-            # 验证 token
-            user = Users(attached_username, self.db_conn)
-
-            # 读取 token_secret
-            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                token_secret = ts_file.read()
-
-            if not user.ifVaildToken(attached_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
-                return
-            
-            user.load()
-            
-            self.handle_getDir(loaded_recv, user)
+            self.handle_getDir(loaded_recv)
 
         elif loaded_recv["request"] == "getRootDir":
-
-            # 验证 token
-            user = Users(attached_username, self.db_conn)
-
-            # 读取 token_secret
-            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                token_secret = ts_file.read()
-
-            if not user.ifVaildToken(attached_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
-                return
             
-            user.load()
-            
-            self.handle_getRootDir(loaded_recv, user)
+            self.handle_getRootDir(loaded_recv)
 
         elif loaded_recv["request"] == "getPolicy":
-
-            # 验证 token
-            user = Users(attached_username, self.db_conn)
-
-            # 读取 token_secret
-            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                token_secret = ts_file.read()
-
-            if not user.ifVaildToken(attached_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
-                return
             
-            user.load()
-            
-            self.handle_getPolicy(loaded_recv, user)
+            self.handle_getPolicy(loaded_recv)
 
         elif loaded_recv["request"] == "getAvatar":
 
-            # 验证 token
-            user = Users(attached_username, self.db_conn)
-
-            # 读取 token_secret
-            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                token_secret = ts_file.read()
-
-            if not user.ifVaildToken(attached_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
-                return
-            
-            user.load()
-            
-            self.handle_getAvatar(loaded_recv, user)
+            self.handle_getAvatar(loaded_recv)
 
         elif loaded_recv["request"] == "uploadFile":
-            
-            # TODO #12 重复验证过程加入装饰器
-            
-            # 验证 token
-            user = Users(attached_username, self.db_conn)
 
-            # 读取 token_secret
-            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                token_secret = ts_file.read()
-
-            if not user.ifVaildToken(attached_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
-                return
-            
-            user.load()
-
-            self.handle_uploadFile(loaded_recv, user)
+            self.handle_uploadFile(loaded_recv)
 
         elif loaded_recv["request"] == "createUser":
 
-            # 验证 token
-            user = Users(attached_username, self.db_conn)
-
-            # 读取 token_secret
-            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                token_secret = ts_file.read()
-
-            if not user.ifVaildToken(attached_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
-                return
-            
-            user.load()
-
-            self.handle_createUser(loaded_recv, user)
+            self.handle_createUser(loaded_recv)
 
         elif loaded_recv["request"] == "createGroup":
-            # 验证 token
-            user = Users(attached_username, self.db_conn)
 
-            # 读取 token_secret
-            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                token_secret = ts_file.read()
-
-            if not user.ifVaildToken(attached_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
-                return
-            
-            user.load()
-
-            self.handle_createGroup(loaded_recv, user)
+            self.handle_createGroup(loaded_recv)
 
         elif loaded_recv["request"] == "getUserProperties":
-            
-            # 验证 token
-            user = Users(attached_username, self.db_conn)
 
-            # 读取 token_secret
-            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                token_secret = ts_file.read()
-
-            if not user.ifVaildToken(attached_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
-                return
-            
-            user.load()
-
-            self.handle_getUserProperties(loaded_recv, user)
+            self.handle_getUserProperties(loaded_recv)
 
         elif loaded_recv["request"] == "shutdown":
 
-            # 验证 token
-            user = Users(attached_username, self.db_conn)
-
-            # 读取 token_secret
-            with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                token_secret = ts_file.read()
-
-            if not user.ifVaildToken(attached_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
-                return
-            
-            user.load()
-
-            self.handle_shutdown(loaded_recv, user)
-
+            self.handle_shutdown(loaded_recv)
 
 
         else:
@@ -846,8 +710,11 @@ class ConnHandler():
                 "msg": "unknown request"
             }))
 
+        # 收尾
+        self.this_time_token = None
+        self.this_time_username = None # 置空
 
-            
+
     def handle_login(self, req_username, req_password):
         # 初始化用户对象 User()
         user = Users(req_username, self.db_conn)
@@ -908,7 +775,6 @@ class ConnHandler():
     def handle_logout(self):
         pass
 
-
     def handle_refreshToken(self, req_username, old_token):
         user = Users(req_username, self.db_conn) # 初始化用户对象
         # 读取 token_secret
@@ -929,7 +795,8 @@ class ConnHandler():
                 "msg": "invaild token or username"
             }))
 
-    def handle_getDir(self, recv, user: object):
+    @userOperationAuthWrapper
+    def handle_getDir(self, recv, user: object): # 诸如此类带 user 参数的才可使用 Wrapper
         path_id = recv["data"].get("id")
 
         if not path_id:
@@ -1052,6 +919,7 @@ class ConnHandler():
                 "msg": "internal server error"
             }))
 
+    @userOperationAuthWrapper
     def handle_getRootDir(self, loaded_recv, user: Users):
         por_policy = Policies("permission_on_rootdir", self.db_conn)
 
@@ -1107,7 +975,7 @@ class ConnHandler():
 
 
 
-
+    @userOperationAuthWrapper
     def handle_getPolicy(self, loaded_recv, user: Users):
         req_policy_id = loaded_recv["data"]["policy_id"]
 
@@ -1144,6 +1012,7 @@ class ConnHandler():
         return
 
 
+    @userOperationAuthWrapper
     def handle_getAvatar(self, loaded_recv, user: Users):
         if not (avatar_username:=loaded_recv["data"].get("username")):
             self.__send(json.dumps({
@@ -1216,6 +1085,7 @@ class ConnHandler():
                     "data": {}
                 }))
 
+    @userOperationAuthWrapper
     def handle_uploadFile(self, loaded_recv, user: Users):
 
         if "data" not in loaded_recv:
@@ -1343,6 +1213,7 @@ class ConnHandler():
 
         return
 
+    @userOperationAuthWrapper
     def handle_operateFile(self, loaded_recv, user: Users):
         
         if "data" not in loaded_recv:
@@ -1598,6 +1469,8 @@ class ConnHandler():
             self.db_conn.commit() # 统一 commit
             handle_cursor.close()
 
+
+    @userOperationAuthWrapper
     def handle_createUser(self, loaded_recv, user: Users):
         if "data" not in loaded_recv:
             self.__send(json.dumps(
@@ -1664,6 +1537,7 @@ class ConnHandler():
 
         return
     
+    @userOperationAuthWrapper
     def handle_createGroup(self, loaded_recv, user: Users):
         if "data" not in loaded_recv:
             self.__send(json.dumps(
@@ -1762,6 +1636,7 @@ class ConnHandler():
 
         return
     
+    @userOperationAuthWrapper
     def handle_shutdown(self, loaded_recv, user: Users):
         
         if not user.hasRights(("shutdown",)):
@@ -1784,7 +1659,8 @@ class ConnHandler():
         client_socket.close()
 
         return
-                
+
+    @userOperationAuthWrapper         
     def handle_getUserProperties(self, loaded_recv, user: Users):
         if "data" not in loaded_recv:
             self.__send(json.dumps(
@@ -1818,9 +1694,6 @@ class ConnHandler():
 
         self.__send(json.dumps(response))
         return
-
-        
-
         
             
 
