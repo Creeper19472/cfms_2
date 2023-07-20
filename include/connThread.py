@@ -26,6 +26,8 @@ from include.bulitin_class.users import Users
 from include.bulitin_class._documents import Documents # 已弃用
 from include.bulitin_class.policies import Policies
 
+from typing import Self
+
 class PendingWriteFileError(Exception):
     pass
 
@@ -494,7 +496,7 @@ class ConnHandler():
     def userOperationAuthWrapper(func):
 
         @wraps(func)
-        def _wrapper(self, *args, **kwargs):
+        def _wrapper(self: Self, *args, **kwargs):
 
             ### 通用用户令牌鉴权开始
             
@@ -683,9 +685,9 @@ class ConnHandler():
 
             self.handle_getAvatar(loaded_recv)
 
-        elif loaded_recv["request"] == "uploadFile":
+        elif loaded_recv["request"] == "createFile":
 
-            self.handle_uploadFile(loaded_recv)
+            self.handle_createFile(loaded_recv)
 
         elif loaded_recv["request"] == "createUser":
 
@@ -791,7 +793,7 @@ class ConnHandler():
             ))
         else:
             self.__send(json.dumps({
-                "code": -1,
+                "code": 401,
                 "msg": "invaild token or username"
             }))
 
@@ -1086,7 +1088,7 @@ class ConnHandler():
                 }))
 
     @userOperationAuthWrapper
-    def handle_uploadFile(self, loaded_recv, user: Users):
+    def handle_createFile(self, loaded_recv, user: Users):
 
         if "data" not in loaded_recv:
             self.__send(json.dumps({
@@ -1320,6 +1322,8 @@ class ConnHandler():
                 
                 elif req_action == "write":
 
+                    do_force_write = loaded_recv["data"].get("force_write", False) # 伪路径文件 ID
+
                     if file_state_code:=file_state["code"] != "ok":
                         if file_state_code == "locked":
                             self.__send(json.dumps({
@@ -1349,7 +1353,8 @@ class ConnHandler():
                     
                     try:
                         task_id, task_token, fake_file_id, expire_time = \
-                            self.createFileTask(query_file_id, operation="write", expire_time=time.time()+3600)
+                            self.createFileTask(query_file_id, operation="write", 
+                                                expire_time=time.time()+3600, force_write=do_force_write)
                     except PendingWriteFileError:
                         self.__send(json.dumps({
                             "code": -1,
