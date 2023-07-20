@@ -238,8 +238,11 @@ class ConnHandler():
                 except:
                     raise
                 continue
-            except ConnectionAbortedError or ConnectionResetError:
-                self.log.logger.info("Connection closed")
+            except ConnectionAbortedError:
+                self.log.logger.info("Connection aborted")
+                sys.exit()
+            except ConnectionResetError:
+                self.log.logger.info("Connection reset")
                 sys.exit()
 
             # print(f"recv: {recv}")
@@ -442,6 +445,99 @@ class ConnHandler():
 
         return True
 
+    def deleteDir(self, dir_id, user: Users, delete_after = 0):
+        handle_cursor = self.db_conn.cursor()
+
+        completed_list = []
+        failed_list = []
+
+        new_state = {
+            "code": "deleted",
+            "expire_time": time.time()+delete_after
+        }
+
+        # 判断是否有权限
+
+        # 遍历下级文件夹
+        handle_cursor.execute('SELECT id FROM path_structures WHERE parent_id = ? AND type = "dir";', (dir_id,))
+
+        query_subs_result = handle_cursor.fetchall()
+
+        for i in query_subs_result:
+            sub_result = self.deleteDir(i[0])
+
+            completed_list += sub_result[0]
+            failed_list += sub_result[1]
+
+        # 获取本级列表
+        handle_cursor.execute("SELECT id FROM path_structures WHERE parent_id = ?", (dir_id,))
+        query_result = handle_cursor.fetchall()
+
+        for i in query_result:
+            if not self.verifyUserAccess(i[0], "delete", user):
+                failed_list.append(i[0])
+            else:
+                # 删除该目录的直系子级文件和目录
+                handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(new_state), i[0]))
+                completed_list.append(i[0])
+                
+        if not failed_list: # 仅当删除下级文件未出现错误时才删除目录
+            handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(new_state), dir_id))
+            completed_list.append(dir_id)
+        else:
+            failed_list.append(dir_id)
+
+        self.db_conn.commit()
+
+        return completed_list, failed_list
+    
+    def recoverDir(self, dir_id, user: Users):
+        # 注意：前后两个函数都不对用户是否有该文件夹权限做判断，应在 handle 部分完成
+
+        handle_cursor = self.db_conn.cursor()
+
+        completed_list = []
+        failed_list = []
+
+        new_state = {
+            "code": "ok",
+            "expire_time": 0
+        }
+
+        # 判断是否有权限
+
+        # 遍历下级文件夹
+        handle_cursor.execute('SELECT id FROM path_structures WHERE parent_id = ? AND type = "dir";', (dir_id,))
+
+        query_subs_result = handle_cursor.fetchall()
+
+        for i in query_subs_result:
+            sub_result = self.recoverDir(i[0])
+
+            completed_list += sub_result[0]
+            failed_list += sub_result[1]
+
+        # 获取本级列表
+        handle_cursor.execute("SELECT id FROM path_structures WHERE parent_id = ?", (dir_id,))
+        query_result = handle_cursor.fetchall()
+
+        for i in query_result:
+            if not self.verifyUserAccess(i[0], "recover", user):
+                failed_list.append(i[0])
+            else:
+                # 恢复该目录的直系子级文件和目录
+                handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(new_state), i[0]))
+                completed_list.append(i[0])
+                
+        # 无论是否全部恢复成功都恢复此目录
+        handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(new_state), dir_id))
+        completed_list.append(dir_id)
+
+        self.db_conn.commit()
+
+        return completed_list, failed_list
+
+
     def getFileSize(self, path_id):
         g_cur = self.db_conn.cursor()
 
@@ -630,8 +726,13 @@ class ConnHandler():
             return # 如果不返回，那么下面的判断就会被执行了
         
         elif loaded_recv["request"] == "disconnect":
-            self.__send("Goodbye")
-            self.conn.close()
+
+            try:
+                self.__send("Goodbye")
+            except ConnectionResetError: # 客户端此时断开了也无所谓
+                pass
+            finally:
+                self.conn.close()
 
             self.log.logger.info("客户端断开连接")
 
@@ -668,6 +769,10 @@ class ConnHandler():
         elif loaded_recv["request"] == "operateFile":
             
             self.handle_operateFile(loaded_recv)
+
+        elif loaded_recv["request"] == "operateDir":
+
+            self.handle_operateDir(loaded_recv)
 
         elif loaded_recv["request"] == "getDir":
             
@@ -731,7 +836,8 @@ class ConnHandler():
 
                 self.__send(json.dumps({
                     "code": 0,
-                    "token": user.generateUserToken(("all"), 3600, token_secret)
+                    "token": user.generateUserToken(("all"), 3600, token_secret),
+                    "ftp_port": self.config["connect"]["ftp_port"]
                 })
                 )
 
@@ -1387,24 +1493,16 @@ class ConnHandler():
                         }))
                         return
                     
-                    # if file_state_code:=file_state["code"] != "ok":
-                    #     if file_state_code == "locked":
-                    #         self.__send(json.dumps({
-                    #             "code": -1,
-                    #             "msg": "文件已锁定，请先解锁",
-                    #             "data": {
-                    #                 "expire_time": file_state.get("expire_time", 0)
-                    #             }
-                    #         }))
-                            
-                    #     elif file_state_code == "deleted":
-                    #         self.__send(json.dumps({
-                    #             "code": -1,
-                    #             "msg": "文件已被标记为删除，请先恢复",
-                    #             "data": {
-                    #                 "expire_time": file_state.get("expire_time", 0)
-                    #             }
-                    #         }))
+                    if file_state_code:=file_state["code"] != "ok":
+                        if file_state_code == "locked":
+                            self.__send(json.dumps({
+                                "code": -1,
+                                "msg": "文件已锁定，请先解锁",
+                                "data": {
+                                    "expire_time": file_state.get("expire_time", 0)
+                                }
+                            }))
+                            return
 
                     
                     handle_cursor.execute("UPDATE path_structures SET name = ? WHERE id = ?;", (new_filename, file_id))
@@ -1699,6 +1797,180 @@ class ConnHandler():
 
         self.__send(json.dumps(response))
         return
+        
+    @userOperationAuthWrapper
+    def handle_operateDir(self, loaded_recv, user: Users):
+        
+        if "data" not in loaded_recv:
+            self.__send(json.dumps(
+                self.RES_MISSING_ARGUMENT
+            ))
+            return
+        
+        if not (action:=loaded_recv["data"].get("action", None)):
+            self.__send(json.dumps(
+                self.RES_MISSING_ARGUMENT
+            ))
+            return
+        
+        if not (dir_id:=loaded_recv["data"].get("dir_id", None)):
+            self.__send(json.dumps(
+                {
+                    "code" : -1,
+                    "msg": "need a dir id"
+                }
+            ))
+            return
+        
+        view_deleted = loaded_recv["data"].get("view_deleted", False)
+        
+        if loaded_recv["data"]["action"] == "recover":
+            view_deleted = True # 若要恢复文件，则必须有权访问被删除的文件
+        
+        if view_deleted: # 如果启用 view_deleted 选项
+            if not user.hasRights(("view_deleted",)):
+                self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                return
+
+        
+        handle_cursor = self.db_conn.cursor()
+
+        handle_cursor.execute('SELECT name, parent_id, access_rules, external_access, properties, state \
+                              FROM path_structures WHERE id = ? AND type = "dir";', \
+                              (dir_id,))
+        
+        result = handle_cursor.fetchall()
+
+        # print(result)
+
+        if len(result) > 1:
+            raise ValueError("Invaild query result length")
+        elif len(result) < 1:
+            self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "no such dir"
+                }))
+            return
+        else:
+            if (dir_state:=json.loads(result[0][5]))["code"] == "deleted": 
+                # 如下，file_state 不一定是 file 的 state，但由于安全性原因只能先写这个判断
+                if not view_deleted:
+                    self.__send(
+                        json.dumps(self.RES_NOT_FOUND)
+                    )
+                    return
+
+        
+        if action in ["list", "delete", "permanently_delete", "rename", "recover"]:
+
+            # 鉴权
+            if not self.verifyUserAccess(dir_id, action, user, _subcall = False):
+                self.__send(json.dumps({
+                    "code": 403,
+                    "msg": "permission denied"
+                }))
+                self.log.logger.debug("权限校验失败：无权执行所请求的操作")
+                return
+            
+            if action == "list":
+                self.handle_getDir(loaded_recv, user)
+
+            elif action == "delete":
+                recycle_policy = Policies("recycle", self.db_conn)
+                delete_after_marked_time = recycle_policy["deleteAfterMarked"]
+
+                if dir_state["code"] == "deleted":
+                    self.__send(json.dumps({
+                        "code": -1, 
+                        "msg": "The directory has been marked for deletion"
+                    }))
+                    return
+
+                succeeded, failed = self.deleteDir(dir_id, user, delete_after=delete_after_marked_time)
+
+                if failed:
+                    response_code = -3 # 请求已经完成，但有错误
+                else:
+                    response_code = 0
+
+                response = {
+                    "code": response_code,
+                    "msg": "request processed",
+                    "data": {
+                        "succeeded": succeeded,
+                        "failed": failed
+                    }
+                }
+
+                self.__send(json.dumps(response))
+
+            elif action == "permanently_delete":
+                pass
+
+            elif action == "rename":
+
+                try:
+                    new_dirname = loaded_recv["data"]["new_dirname"]
+                except ValueError:
+                    self.__send(json.dumps({
+                        "code": -1,
+                        "msg": "not all arguments provided"
+                    }))
+                    return
+                
+                if file_state_code:=dir_state["code"] != "ok":
+                    if file_state_code == "locked":
+                        self.__send(json.dumps({
+                            "code": -1,
+                            "msg": "directory is locked",
+                            "data": {
+                                "expire_time": dir_state.get("expire_time", 0)
+                            }
+                        }))
+                        return
+
+                handle_cursor.execute("UPDATE path_structures SET name = ? WHERE id = ?;", (new_dirname, dir_id))
+
+                self.db_conn.commit()
+
+                self.__send(json.dumps({
+                    "code": 0,
+                    "msg": "success"
+                }))
+
+
+            elif action == "recover": # 会恢复其下的所有内容，无论其是否因删除此文件夹而被删除
+                
+                if dir_state["code"] != "deleted":
+                    self.__send(json.dumps({
+                        "code": -1, 
+                        "msg": "File is not deleted"
+                    }))
+                    return
+
+                succeeded, failed = self.recoverDir(dir_id, user)
+
+                if failed:
+                    response_code = -3 # 请求已经完成，但有错误
+                else:
+                    response_code = 0
+
+                response = {
+                    "code": response_code,
+                    "msg": "request processed",
+                    "data": {
+                        "succeeded": succeeded,
+                        "failed": failed
+                    }
+                }
+
+                self.__send(json.dumps(response))
+                
+
+        else:
+            self.__send(json.dumps(self.RES_BAD_REQUEST))
+                
+
         
             
 
