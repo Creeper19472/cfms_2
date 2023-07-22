@@ -239,10 +239,10 @@ class ConnHandler():
                     raise
                 continue
             except ConnectionAbortedError:
-                self.log.logger.info("Connection aborted")
+                self.log.logger.info(f"{self.addr}: Connection aborted")
                 sys.exit()
             except ConnectionResetError:
-                self.log.logger.info("Connection reset")
+                self.log.logger.info(f"{self.addr}: Connection reset")
                 sys.exit()
 
             # print(f"recv: {recv}")
@@ -625,6 +625,24 @@ class ConnHandler():
         用户鉴权函数。
         用于逐级检查用户是否拥有访问权限，若发生任意无情况即返回 False
         """
+
+        por_policy = Policies("permission_on_rootdir", self.db_conn)
+
+        if id == None:
+            raise ValueError
+        elif not id:
+            self.log.logger.debug("请求验证的路径是根目录")
+
+            por_access_rules = por_policy["rules"]["access_rules"]
+            por_external_access = por_policy["rules"]["external_access"]
+
+            if not self._verifyAccess(user, action, por_access_rules, por_external_access, checkdeny):
+                self.log.logger.debug("PoR 鉴权失败")
+                return False
+            else:
+                self.log.logger.debug("PoR 鉴权成功")
+                return True
+
         self.log.logger.debug(f"verifyUserAccess(): 正在对 用户 {user.username} 访问 id: {id} 的请求 进行鉴权")
 
         db_cur = self.db_conn.cursor()
@@ -633,8 +651,6 @@ class ConnHandler():
         result = db_cur.fetchall()
 
         assert len(result) == 1
-
-        por_policy = Policies("permission_on_rootdir", self.db_conn)
 
         access_rules = json.loads(result[0][1])
         external_access = json.loads(result[0][2])
@@ -670,16 +686,8 @@ class ConnHandler():
                 self.log.logger.debug("完毕，无事发生。")
 
             elif por_policy["inherit_by_subdirectory"]: # 如果没有父级（是根目录）
-                self.log.logger.debug("PoR_IbS 已激活，正在检查用户对于根目录的权限...")
-
-                por_access_rules = por_policy["rules"]["access_rules"]
-                por_external_access = por_policy["rules"]["external_access"]
-
-                if not self._verifyAccess(user, action, por_access_rules, por_external_access, parent_checkdeny):
-                    self.log.logger.debug("PoR 鉴权失败")
+                if not self.verifyUserAccess("", action, user, parent_checkdeny, True):
                     return False
-                else:
-                    self.log.logger.debug("PoR 鉴权成功")
 
         else:
             self.log.logger.debug("请求操作在该路径上被设置为不继承上层设置，跳过")
@@ -734,7 +742,7 @@ class ConnHandler():
             finally:
                 self.conn.close()
 
-            self.log.logger.info("客户端断开连接")
+            self.log.logger.info(f"{self.addr}: 客户端断开连接")
 
             sys.exit() # 退出线程
 
@@ -797,6 +805,10 @@ class ConnHandler():
         elif loaded_recv["request"] == "createUser":
 
             self.handle_createUser(loaded_recv)
+
+        elif loaded_recv["request"] == "createDir":
+            
+            self.handle_createDir(loaded_recv)
 
         elif loaded_recv["request"] == "createGroup":
 
@@ -1392,7 +1404,7 @@ class ConnHandler():
 
             self.log.logger.debug(f"请求对文件的操作：{req_action}")
 
-            if req_action in ["read", "write", "rename", "delete", "permanently_delete", "recover"]:
+            if req_action in ["read", "write", "rename", "delete", "permanently_delete", "recover", "move", "change_id"]:
 
                 # 注意：write 操作仅支持覆盖，创建请使用 uploadFile
 
@@ -1484,20 +1496,17 @@ class ConnHandler():
                 
                 elif req_action == "rename":
 
-                    try:
-                        new_filename = loaded_recv["data"]["new_filename"]
-                    except ValueError:
-                        self.__send(json.dumps({
-                            "code": -1,
-                            "msg": "not all arguments provided"
-                        }))
-                        return
+                    new_filename = loaded_recv["data"].get("new_filename", None)
                     
+                    if not new_filename: # filename 不能为空
+                        self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+                        return
+
                     if file_state_code:=file_state["code"] != "ok":
                         if file_state_code == "locked":
                             self.__send(json.dumps({
                                 "code": -1,
-                                "msg": "文件已锁定，请先解锁",
+                                "msg": "file locked",
                                 "data": {
                                     "expire_time": file_state.get("expire_time", 0)
                                 }
@@ -1560,6 +1569,98 @@ class ConnHandler():
                     self.permanentlyDeleteFile(file_id)
 
                     self.__send(json.dumps(self.RES_OK))
+
+                elif req_action == "move":
+
+                    new_parent_id = loaded_recv["data"].get("new_parent", None)
+
+                    if new_parent_id == None:
+                        self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+                        return
+                    
+                    # 判断新目录是否存在
+
+                    handle_cursor = self.db_conn.cursor()
+
+                    handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (new_parent_id, ))
+
+                    query_result = handle_cursor.fetchall()
+
+                    if len(query_result) == 0:
+                        self.__send(json.dumps(self.RES_NOT_FOUND))
+                        return
+                    elif len(query_result) != 1:
+                        raise ValueError("意料之外的记录数量")
+                    
+                    if query_result[0][0] != "dir":
+                        self.__send(json.dumps({
+                            "code": -1,
+                            "msg": "新的路径不是一个目录"
+                        }))
+                        return
+                    
+                    # 调取原目录
+
+                    handle_cursor.execute("SELECT parent_id FROM path_structures WHERE id = ?", (query_file_id, ))
+
+                    old_parent_result = handle_cursor.fetchone()
+
+                    old_parent_id = old_parent_result[0]
+
+                    
+                    if not self.verifyUserAccess(new_parent_id, "write", user)\
+                        or not self.verifyUserAccess(old_parent_id, "delete", user): 
+                        # 移动操作实际上是向新目录写入文件，并删除旧目录文件
+                        
+                        self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                        return
+                    
+                    # 执行操作
+
+                    handle_cursor.execute("UPDATE path_structures SET parent_id = ? WHERE id = ?;", (new_parent_id, query_file_id))
+
+                    self.db_conn.commit()
+
+                    self.__send(json.dumps(self.RES_OK))
+
+                    return
+                
+                elif req_action == "change_id":
+
+                    if not user.hasRights(("change_id",)):
+                        self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                        return
+                
+                    new_id = loaded_recv["data"].get("new_id", None)
+
+                    if not new_id: # id 不能为空
+                        self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+                        return
+
+                    # 判断新 ID 是否被使用
+
+                    handle_cursor = self.db_conn.cursor()
+
+                    handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (new_id, ))
+
+                    result = handle_cursor.fetchall()
+
+                    if result:
+                        self.__send(json.dumps({
+                            "code": -1,
+                            "msg": "id exists"
+                        }))
+                        return
+                    
+                    # 执行操作
+
+                    handle_cursor.execute("UPDATE path_structures SET id = ? WHERE id = ?;", (new_id, query_file_id))
+
+                    self.db_conn.commit()
+
+                    self.__send(json.dumps(self.RES_OK))
+
+                    return
 
             else:
                 self.__send(json.dumps({
@@ -1861,7 +1962,7 @@ class ConnHandler():
                     return
 
         
-        if action in ["list", "delete", "permanently_delete", "rename", "recover"]:
+        if action in ["list", "delete", "permanently_delete", "rename", "recover", "move", "change_id"]:
 
             # 鉴权
             if not self.verifyUserAccess(dir_id, action, user, _subcall = False):
@@ -1873,7 +1974,7 @@ class ConnHandler():
                 return
             
             if action == "list":
-                self.handle_getDir(loaded_recv, user)
+                self.handle_getDir(loaded_recv)
 
             elif action == "delete":
                 recycle_policy = Policies("recycle", self.db_conn)
@@ -1909,17 +2010,15 @@ class ConnHandler():
 
             elif action == "rename":
 
-                try:
-                    new_dirname = loaded_recv["data"]["new_dirname"]
-                except ValueError:
-                    self.__send(json.dumps({
-                        "code": -1,
-                        "msg": "not all arguments provided"
-                    }))
+                new_dirname = loaded_recv["data"].get("new_dirname", None)
+                    
+                if not new_dirname: # dirname 不能为空
+                    self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
                     return
+
                 
-                if file_state_code:=dir_state["code"] != "ok":
-                    if file_state_code == "locked":
+                if dir_state_code:=dir_state["code"] != "ok":
+                    if dir_state_code == "locked":
                         self.__send(json.dumps({
                             "code": -1,
                             "msg": "directory is locked",
@@ -1944,7 +2043,7 @@ class ConnHandler():
                 if dir_state["code"] != "deleted":
                     self.__send(json.dumps({
                         "code": -1, 
-                        "msg": "File is not deleted"
+                        "msg": "Directory is not deleted"
                     }))
                     return
 
@@ -1965,12 +2064,237 @@ class ConnHandler():
                 }
 
                 self.__send(json.dumps(response))
+
+            elif action == "move": # 基本同 operateFile 的判断
+
+                new_parent_id = loaded_recv["data"].get("new_parent", None)
+
+                if new_parent_id == None: # 因为根目录的id为空
+                    self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+                    return
                 
+                if new_parent_id == dir_id:
+                    self.__send(json.dumps({
+                        "code": -2,
+                        "msg": "一个目录的父级目录不能指向它自己"
+                    }))
+                    return
+                
+                # 判断新目录是否存在
+
+                handle_cursor = self.db_conn.cursor()
+
+                handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (new_parent_id, ))
+
+                query_result = handle_cursor.fetchall()
+
+                if len(query_result) == 0:
+                    self.__send(json.dumps({
+                        "code": 404,
+                        "msg": "没有找到请求的新目录"
+                    }))
+                    return
+                elif len(query_result) != 1:
+                    raise ValueError("意料之外的记录数量")
+                
+                if query_result[0][0] != "dir":
+                    self.__send(json.dumps({
+                        "code": -1,
+                        "msg": "新的路径不是一个目录"
+                    }))
+                    return
+                
+                # 调取原目录
+
+                handle_cursor.execute("SELECT parent_id FROM path_structures WHERE id = ?", (dir_id, ))
+
+                old_parent_result = handle_cursor.fetchone()
+
+                old_parent_id = old_parent_result[0]
+
+                
+                if not self.verifyUserAccess(new_parent_id, "write", user)\
+                    or not self.verifyUserAccess(old_parent_id, "delete", user): 
+                    # 移动操作实际上是向新目录写入文件，并删除旧目录文件
+                    
+                    self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                    return
+                
+                # 执行操作
+
+                handle_cursor.execute("UPDATE path_structures SET parent_id = ? WHERE id = ?;", (new_parent_id, dir_id)) 
+                # 不需要对下级文件做其他操作
+
+                self.db_conn.commit()
+
+                self.__send(json.dumps(self.RES_OK))
+
+                return
+            
+            elif action == "change_id":
+
+                if not user.hasRights(("change_id",)):
+                    self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                    return
+                
+                new_id = loaded_recv["data"].get("new_id", None)
+
+                if not new_id:
+                    self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+                    return
+                
+                if new_id == dir_id: # 如果和原ID一致，用于减少数据库开销
+                    self.__send(json.dumps({
+                        "code": 0,
+                        "msg": "no changes made"
+                    }))
+                    return
+
+                # 判断新 ID 是否被使用
+
+                handle_cursor = self.db_conn.cursor()
+
+                handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (new_id, ))
+
+                result = handle_cursor.fetchall()
+
+                if result:
+                    self.__send(json.dumps({
+                        "code": -1,
+                        "msg": "id exists"
+                    }))
+                    return
+                
+                # 执行操作
+
+                handle_cursor.execute("UPDATE path_structures SET id = ? WHERE id = ?;", (new_id, dir_id))
+
+                self.db_conn.commit()
+
+                self.__send(json.dumps(self.RES_OK))
+
+                return
 
         else:
             self.__send(json.dumps(self.RES_BAD_REQUEST))
                 
+    def handle_createDir(self, loaded_recv, user: Users):
+        
+        if "data" not in loaded_recv:
+            self.__send(json.dumps(
+                self.RES_MISSING_ARGUMENT
+            ))
+            return
+        
+        if not user.hasRights(("create_dir",)): # 鉴权
+            self.__send(json.dumps(self.RES_ACCESS_DENIED))
+            return 
 
+        target_parent_id = loaded_recv["data"].get("parent_id", "") # fallback to rootdir
+        target_id = loaded_recv["data"].get("dir_id", None)
+        new_dirname = loaded_recv["data"].get("name", None)
+
+        if not new_dirname:
+            self.__send(json.dumps(
+                self.RES_MISSING_ARGUMENT
+            ))
+            return
+        
+        if not target_id: # 自动生成
+            target_id = secrets.token_hex(16)
+        
+        handle_cursor = self.db_conn.cursor()
+
+        handle_cursor.execute("SELECT * FROM path_structures WHERE id = ?", (target_id,))
+
+        query_result = handle_cursor.fetchall()
+
+        if query_result:
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "file or directory exists.",
+                "__hint__": "if you want to override a directory, use 'operateDir' instead."
+            }))
+            return
+        
+        del query_result # 清除
+
+        if target_parent_id: # 如果不是根目录
+
+            handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (target_parent_id,))
+
+            dir_query_result = handle_cursor.fetchall()
+
+            if not dir_query_result:
+                self.__send(json.dumps({
+                    "code": 404,
+                    "msg": "target directory not found"
+                }))
+                return
+            elif len(dir_query_result) >= 1:
+                raise RuntimeError("数据库出现了不止一条同id的记录")
+            
+            if (d_id_type:=dir_query_result[0][0]) != "dir":
+                self.log.logger.debug(f"用户试图请求在 id 为 {target_parent_id} 的目录下创建文件，\
+                                    但它事实上不是一个目录（{d_id_type}）")
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "not a directory"
+                }))
+                return
+            
+            if not self.verifyUserAccess(target_id, "write", user):
+                self.__send(json.dumps(
+                    self.RES_ACCESS_DENIED
+                ))
+                return
+            
+        else:
+            por_policy = Policies("permission_on_rootdir", self.db_conn)
+
+            por_access_rules = por_policy["rules"]["access_rules"]
+            por_external_access = por_policy["rules"]["external_access"]
+
+            if not self._verifyAccess(user, "write", por_access_rules, por_external_access, True):
+                self.log.logger.debug("用户无权访问根目录")
+                self.__send(self.RES_ACCESS_DENIED)
+                return
+            else:
+                self.log.logger.debug("根目录鉴权成功")
+
+        
+        # 开始创建文件夹
+
+
+        # 注册数据库条目
+
+        handle_cursor.execute("INSERT INTO path_structures \
+                              (id , name , owner , parent_id , type , file_id , access_rules, external_access, properties, state) \
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                              (target_id, new_dirname, json.dumps((("user", user.username),)), target_parent_id, 
+                               "dir", None, r"{}", r"{}", json.dumps({
+                                   "created_time": time.time()
+                               }), json.dumps({
+                                   "code": "ok",
+                                   "expire_time": 0
+                               }) ))
+        
+        self.db_conn.commit()
+        handle_cursor.close()
+
+
+        self.__send(json.dumps({
+            "code": 0,
+            "msg": "directory created",
+            "data": {
+                "dir_id": target_id
+            }
+        }))
+
+        return
+
+
+        
         
             
 

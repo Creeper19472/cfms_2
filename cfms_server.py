@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "230720_alpha")
+CORE_VERSION = (1, 0, 0, "230722_alpha")
 READABLE_VERSION = f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
 
 
@@ -163,7 +163,8 @@ def dbInit(db_object: DB_Sqlite3):
         "create_group" : {},
         "custom_new_group_settings": {},
         "custom_new_group_members": {},
-        "view_others_properties": {}
+        "view_others_properties": {},
+        "change_id": {}
     }
 
     insert_groups = (
