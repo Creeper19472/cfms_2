@@ -11,7 +11,6 @@ import sys, os, json, socket, sqlite3, gettext, time, random, threading
 import tomllib
 import hashlib
 import socketserver # 准备切到 socketserver
-import include
 import include.logtool as logtool
 from include.connThread import * 
 from Crypto.PublicKey import RSA
@@ -44,7 +43,7 @@ class DB_Sqlite3(object):
 
 def dbInit(db_object: DB_Sqlite3):
     cur = db_object.conn.cursor()
-    cur.execute("CREATE TABLE users(username TEXT, hash TEXT, salt TEXT, rights BLOB, groups BLOB, properties BLOB)")
+    cur.execute("CREATE TABLE users(username TEXT, hash TEXT, salt TEXT, rights BLOB, groups BLOB, properties BLOB, publickey TEXT)")
     """
     rights: 额外权限。接受列表输入。
     此栏包含的权限将附加于用户个人。
@@ -111,10 +110,10 @@ def dbInit(db_object: DB_Sqlite3):
     }
 
     insert_users = (
-        ("admin", sha256, salt, json.dumps(user_rights), json.dumps(user_groups), json.dumps(user_properties)),
-        ("guest", sha256, salt, json.dumps({}), json.dumps({}), json.dumps(user_properties))
+        ("admin", sha256, salt, json.dumps(user_rights), json.dumps(user_groups), json.dumps(user_properties), None), 
+        ("guest", sha256, salt, json.dumps({}), json.dumps({}), json.dumps(user_properties), None)
     )
-    cur.executemany("INSERT INTO users VALUES(?, ?, ?, ?, ?, ?)", insert_users)
+    cur.executemany("INSERT INTO users VALUES(?, ?, ?, ?, ?, ?, ?)", insert_users)
 
     # 新建文档索引表
     
@@ -159,12 +158,14 @@ def dbInit(db_object: DB_Sqlite3):
             "expire": 0
         },
         "create_user": {},
+        "create_dir": {},
         "custom_new_user_settings": {},
         "create_group" : {},
         "custom_new_group_settings": {},
         "custom_new_group_members": {},
         "view_others_properties": {},
-        "change_id": {}
+        "change_id": {},
+        "edit_other_users": {}
     }
 
     insert_groups = (
@@ -307,7 +308,7 @@ def dbInit(db_object: DB_Sqlite3):
     # create file transport queue table
     fQ_cur.execute(
         "CREATE TABLE ft_queue\
-            (task_id TEXT, token TEXT, operation TEXT, file_id TEXT, fake_id TEXT, fake_dir TEXT, expire_time INTEGER, done INTEGER)"
+            (task_id TEXT, username TEXT, token TEXT, operation TEXT, file_id TEXT, fake_id TEXT, fake_dir TEXT, expire_time INTEGER, done INTEGER)"
         )
     # file_id: 存贮在 document_indexes 中的文件id
     # fake_id: 这个 id 将作为 ftp 服务中以 task_id 为账户名的用户目录下的文件名。

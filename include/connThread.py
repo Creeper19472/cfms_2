@@ -23,10 +23,11 @@ import base64
 import sqlite3
 
 from include.bulitin_class.users import Users
-from include.bulitin_class._documents import Documents # 已弃用
+from include.bulitin_class._documents import Documents  # 已弃用
 from include.bulitin_class.policies import Policies
 
 from typing import Self
+
 
 class PendingWriteFileError(Exception):
     pass
@@ -36,7 +37,7 @@ class ConnThreads(threading.Thread):
     def __init__(self, target, name, args=(), kwargs={}):
         super().__init__()
         self.target = target
-        self.name = name # 只能是这个变量名
+        self.name = name  # 只能是这个变量名
         # 传给真正的处理类
         self.args = args
         self.kwargs = kwargs
@@ -48,46 +49,29 @@ class ConnThreads(threading.Thread):
             target_class.main()
         except Exception as e:
             e.add_note("看起来线程内部的运行出现了问题。将关闭到客户端的连接。")
-            target_class.log.logger.fatal(f"{self.name}: 看起来线程内部的运行出现了问题：", exc_info=True)
+            target_class.log.logger.fatal(
+                f"{self.name}: 看起来线程内部的运行出现了问题：", exc_info=True
+            )
             target_class.conn.close()
             sys.exit()
 
-class ConnHandler():
 
+class ConnHandler:
     # 定义经常使用的响应内容
 
-    RES_MISSING_ARGUMENT = {
-        "code": -1,
-        "msg": "missing necessary arguments"
-    }
+    RES_MISSING_ARGUMENT = {"code": -1, "msg": "missing necessary arguments"}
 
-    RES_ACCESS_DENIED = {
-        "code": 403,
-        "msg": "access denied"
-    }
+    RES_ACCESS_DENIED = {"code": 403, "msg": "access denied"}
 
-    RES_NOT_FOUND = {
-        "code": 404,
-        "msg": "not found"
-    }
+    RES_NOT_FOUND = {"code": 404, "msg": "not found"}
 
-    RES_INTERNAL_ERROR = {
-        "code": 500,
-        "msg": "internal server error"
-    }
+    RES_INTERNAL_ERROR = {"code": 500, "msg": "internal server error"}
 
-    RES_OK = {
-        "code": 0,
-        "msg": "ok"
-    }
+    RES_OK = {"code": 0, "msg": "ok"}
 
-    RES_BAD_REQUEST = {
-        "code": 400,
-        "msg": "bad request"
-    }
+    RES_BAD_REQUEST = {"code": 400, "msg": "bad request"}
 
-
-    def __init__(self, thread_name, *args, **kwargs): #!!注意，self.thread_name 在调用类定义！
+    def __init__(self, thread_name, *args, **kwargs):  #!!注意，self.thread_name 在调用类定义！
         self.root_abspath = kwargs["root_abspath"]
 
         self.args = args
@@ -105,16 +89,19 @@ class ConnHandler():
 
         self.db_conn = sqlite3.connect(f"{self.root_abspath}/general.db")
 
-        self.config = kwargs["toml_config"] # 导入配置字典
+        self.config = kwargs["toml_config"]  # 导入配置字典
 
-        self.locale = self.config['general']['locale']
-        
+        self.locale = self.config["general"]["locale"]
 
-        sys.path.append(f"{self.root_abspath}/include/") # 增加导入位置
+        sys.path.append(f"{self.root_abspath}/include/")  # 增加导入位置
         # sys.path.append(f"{self.root_abspath}/include/class")
 
         from logtool import LogClass
-        self.log = LogClass(logname=f"main.connHandler.{self.thread_name}", filepath=f'{self.root_abspath}/main.log')
+
+        self.log = LogClass(
+            logname=f"main.connHandler.{self.thread_name}",
+            filepath=f"{self.root_abspath}/main.log",
+        )
 
         # from bulitin_class.users import Users
 
@@ -124,7 +111,7 @@ class ConnHandler():
 
         self.__initRSA()
         self.aes_key = None
-        
+
     def __initRSA(self):
         with open(f"{self.root_abspath}/content/auth/pri.pem", "rb") as pri_file:
             self.private_key = RSA.import_key(pri_file.read())
@@ -135,8 +122,7 @@ class ConnHandler():
         self.pub_cipher = PKCS1_OAEP.new(self.public_key)
 
     def aes_encrypt(self, plain_text, key):
-
-        cipher = AES.new(key, AES.MODE_CBC) # 使用CBC模式
+        cipher = AES.new(key, AES.MODE_CBC)  # 使用CBC模式
 
         encrypted_text = cipher.encrypt(pad(plain_text.encode(), AES.block_size))
 
@@ -147,7 +133,6 @@ class ConnHandler():
     # 解密
 
     def aes_decrypt(self, encrypted_text, key):
-
         iv = encrypted_text[:16]
 
         cipher = AES.new(key, AES.MODE_CBC, iv)
@@ -156,12 +141,11 @@ class ConnHandler():
 
         return decrypted_text.decode()
 
-
-    def __send(self, msg): # 不内置 json.dumps(): some objects are not hashable
+    def __send(self, msg):  # 不内置 json.dumps(): some objects are not hashable
         self.log.logger.debug(f"raw message to send: {msg}")
         msg_to_send = msg.encode()
         if self.encrypted_connection:
-            encrypted_data = self.aes_encrypt(msg, self.aes_key) # aes_encrypt() 接受文本
+            encrypted_data = self.aes_encrypt(msg, self.aes_key)  # aes_encrypt() 接受文本
             self.conn.sendall(encrypted_data)
         else:
             self.conn.sendall(msg_to_send)
@@ -189,50 +173,56 @@ class ConnHandler():
             print(receive)
             self.__send("Unknown request")
             return False
-        
+
         if self.__recv() != "enableEncryption":
-             self.__send("Unknown request")
-             return False
-        
-        self.__send(json.dumps({
-            "msg": "enableEncryption",
-            "public_key": self.public_key.export_key("PEM").decode(),
-            "code": 0
-        }))
+            self.__send("Unknown request")
+            return False
 
-        receive_encrypted = conn.recv(self.BUFFER_SIZE) # 这里还不能用 self.__recv() 方法：是加密的, 无法decode()
+        self.__send(
+            json.dumps(
+                {
+                    "msg": "enableEncryption",
+                    "public_key": self.public_key.export_key("PEM").decode(),
+                    "code": 0,
+                }
+            )
+        )
 
-        decrypted_data = self.pri_cipher.decrypt(receive_encrypted) # 得到AES密钥
+        receive_encrypted = conn.recv(
+            self.BUFFER_SIZE
+        )  # 这里还不能用 self.__recv() 方法：是加密的, 无法decode()
+
+        decrypted_data = self.pri_cipher.decrypt(receive_encrypted)  # 得到AES密钥
 
         self.log.logger.debug(f"AES Key: {decrypted_data}")
 
         self.aes_key = decrypted_data
-        
-        self.encrypted_connection = True # 激活加密传输标识
-        
+
+        self.encrypted_connection = True  # 激活加密传输标识
+
         return True
 
     def main(self):
-        conn = self.conn # 设置别名
+        conn = self.conn  # 设置别名
 
-        es = gettext.translation("connHandler", localedir=self.root_abspath + "/content/locale", languages=[self.locale], fallback=True)
+        es = gettext.translation(
+            "connHandler",
+            localedir=self.root_abspath + "/content/locale",
+            languages=[self.locale],
+            fallback=True,
+        )
         es.install()
 
         if not self._doFirstCommunication(conn):
             conn.close()
             sys.exit()
         else:
-            self.__send(json.dumps(
-                {
-                    "msg": "ok",
-                    "code": 0
-                }
-            )) # 发送成功回答
+            self.__send(json.dumps({"msg": "ok", "code": 0}))  # 发送成功回答
 
         while not self.terminate_event.is_set():
             try:
                 recv = self.__recv()
-            except ValueError: # Wrong IV, etc.
+            except ValueError:  # Wrong IV, etc.
                 try:
                     self.__send("?")
                 except:
@@ -251,30 +241,20 @@ class ConnHandler():
                 loaded_recv = json.loads(recv)
             except Exception as e:
                 self.log.logger.debug(f"Error when loading recv: {e}")
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild request format"
-                }))
+                self.__send(json.dumps({"code": -1, "msg": "invaild request format"}))
                 continue
 
             client_api_version = loaded_recv.get("version", None)
 
             # 判断 API 版本
             if not client_api_version:
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "API version is not given"
-                }))
+                self.__send(json.dumps({"code": -1, "msg": "API version is not given"}))
                 continue
-
 
             if client_api_version == 1:
                 self.handle_v1(loaded_recv)
-            else: # 目前仅支持 V1
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "unsupported API version"
-                }))
+            else:  # 目前仅支持 V1
+                self.__send(json.dumps({"code": -1, "msg": "unsupported API version"}))
                 continue
 
         self.log.logger.debug(f"terminate_event 被激活，正在终止线程 {self.thread_name}...")
@@ -285,12 +265,19 @@ class ConnHandler():
 
         sys.exit()
 
-    def _verifyAccess(self, user: Users, action, access_rules: dict, external_access: dict, check_deny=True):
-        if not access_rules: # fix #7
-            return True # fallback
-        
+    def _verifyAccess(
+        self,
+        user: Users,
+        action,
+        access_rules: dict,
+        external_access: dict,
+        check_deny=True,
+    ):
+        if not access_rules:  # fix #7
+            return True  # fallback
+
         if user.hasRights(("super_access",)):
-            return True # 放行超级权限，避免管理员被锁定在外
+            return True  # 放行超级权限，避免管理员被锁定在外
 
         # 确认是否满足 deny 规则
         if check_deny:
@@ -304,50 +291,72 @@ class ConnHandler():
             this_deny_users = this_action_deny_value.get("users", {})
             this_deny_rules = this_action_deny_value.get("rules", [])
 
-            _deny_expire_time = None # 置空
+            _deny_expire_time = None  # 置空
 
             if user.username in this_deny_users:
-                if not (_deny_expire_time:=this_deny_users[user.username].get("expire", 0)): # 如果expire为0
+                if not (
+                    _deny_expire_time := this_deny_users[user.username].get("expire", 0)
+                ):  # 如果expire为0
                     return False
-                if _deny_expire_time > time.time(): # 如果尚未过期
+                if _deny_expire_time > time.time():  # 如果尚未过期
                     return False
-                
-            _deny_expire_time = None # 置空
+
+            _deny_expire_time = None  # 置空
 
             for i in user.groups:
                 if i in this_deny_groups:
-                    if not (_deny_expire_time:=this_deny_groups[i].get("expire", 0)): # 如果expire为0
+                    if not (
+                        _deny_expire_time := this_deny_groups[i].get("expire", 0)
+                    ):  # 如果expire为0
                         return False
-                    if _deny_expire_time > time.time(): # 如果尚未过期
+                    if _deny_expire_time > time.time():  # 如果尚未过期
                         return False
-                    
+
             del _deny_expire_time
 
-            if this_deny_rules: # 必须存在才会判断
+            if this_deny_rules:  # 必须存在才会判断
                 if user.ifMatchRules(this_deny_rules):
                     return False
 
         # access_rules 包括所有规则
         if user.ifMatchRules(access_rules[action]):
             return True
-        
+
         if external_access:
-        
             for i in external_access["groups"]:
-                if action not in (i_dict:=external_access["groups"][i]).keys():
+                if action not in (i_dict := external_access["groups"][i]).keys():
                     continue
-                if (not (expire_time:=i_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户组拥有的权限尚未到期
-                    if user.hasGroups((i,)): # 如果用户存在于此用户组
+                if (not (expire_time := i_dict[action].get("expire", 0))) or (
+                    expire_time >= time.time()
+                ):  # 如果用户组拥有的权限尚未到期
+                    if user.hasGroups((i,)):  # 如果用户存在于此用户组
                         return True
-                    
-            if user.username in external_access["users"].keys(): # 如果用户在字典中有记录
-                if action in (user_action_dict:=external_access["users"][user.username]).keys(): # 如果请求操作在用户的字典中有记录
-                    if (not (expire_time:=user_action_dict[action].get("expire", 0))) or (expire_time >= time.time()): # 如果用户拥有的权限尚未到期
+
+            if user.username in external_access["users"].keys():  # 如果用户在字典中有记录
+                if (
+                    action
+                    in (
+                        user_action_dict := external_access["users"][user.username]
+                    ).keys()
+                ):  # 如果请求操作在用户的字典中有记录
+                    if (
+                        not (expire_time := user_action_dict[action].get("expire", 0))
+                    ) or (
+                        expire_time >= time.time()
+                    ):  # 如果用户拥有的权限尚未到期
                         return True
-                
+
         return False
-    
-    def createFileTask(self, file_id, task_id=None, operation="read", expire_time=None, force_write=False):
+
+    def createFileTask(
+        self,
+        file_id,
+        username,
+        task_id=None,
+        operation="read",
+        expire_time=None,
+        force_write=False,
+    ):
         fqueue_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
 
         fq_cur = fqueue_db.cursor()
@@ -356,14 +365,14 @@ class ConnHandler():
             task_id = secrets.token_hex(64)
 
         if expire_time == None:
-            expire_time = time.time() + 3600 # by default
-        
+            expire_time = time.time() + 3600  # by default
+
         token_hash = secrets.token_hex(64)
         token_salt = secrets.token_hex(16)
 
         token_hash_sha256 = hashlib.sha256(token_hash.encode()).hexdigest()
         final_token_hash_obj = hashlib.sha256()
-        final_token_hash_obj.update((token_hash_sha256+token_salt).encode())
+        final_token_hash_obj.update((token_hash_sha256 + token_salt).encode())
 
         final_token_hash = final_token_hash_obj.hexdigest()
 
@@ -374,50 +383,70 @@ class ConnHandler():
         fake_dir = task_id[32:]
 
         if operation == "write":
-            fq_cur.execute('SELECT * FROM ft_queue WHERE file_id = ? AND operation = "write" AND done = 0;', (file_id, ))
+            fq_cur.execute(
+                'SELECT * FROM ft_queue WHERE file_id = ? AND operation = "write" AND done = 0;',
+                (file_id,),
+            )
             query_result = fq_cur.fetchall()
 
             if query_result and not force_write:
                 raise PendingWriteFileError("文件存在一需要写入的任务，且该任务尚未完成")
 
-        fq_cur.execute("INSERT INTO ft_queue (task_id, operation, token, fake_id, fake_dir, file_id, expire_time, done) \
-                        VALUES ( ?, ?, ?, ?, ?, ?, ?, 0 );", (task_id, operation, json.dumps(token_to_store),\
-                                                            fake_id, fake_dir, file_id, expire_time))
-        
+        fq_cur.execute(
+            "INSERT INTO ft_queue (task_id, username, operation, token, fake_id, fake_dir, file_id, expire_time, done) \
+                        VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, 0 );",
+            (
+                task_id,
+                username,
+                operation,
+                json.dumps(token_to_store),
+                fake_id,
+                fake_dir,
+                file_id,
+                expire_time,
+            ),
+        )
+
         fqueue_db.commit()
         fqueue_db.close()
 
         return task_id, token_hash_sha256, fake_id, expire_time
-    
+
     def permanentlyDeleteFile(self, fake_path_id):
         g_cur = self.db_conn.cursor()
 
         # 查询文件信息
 
-        g_cur.execute("SELECT type , file_id FROM path_structures WHERE id = ?", (fake_path_id,))
+        g_cur.execute(
+            "SELECT type , file_id FROM path_structures WHERE id = ?", (fake_path_id,)
+        )
         query_result = g_cur.fetchall()
 
         if len(query_result) == 0:
             raise FileNotFoundError
         elif len(query_result) > 1:
             raise ValueError("在查询表 path_structures 时发现不止一条同路径 id 的记录")
-        
+
         got_type, index_file_id = query_result[0]
 
         if got_type != "file":
             raise TypeError("删除的必须是一个文件")
-        
+
         # 查询 document_indexes 表
 
-        g_cur.execute("SELECT abspath FROM document_indexes WHERE id = ?", (index_file_id,))
+        g_cur.execute(
+            "SELECT abspath FROM document_indexes WHERE id = ?", (index_file_id,)
+        )
 
         index_query_result = g_cur.fetchall()
 
         if len(index_query_result) == 0:
-            raise FileNotFoundError(f"未发现在 path_structures 中所指定的文件 id '{index_file_id}' 的记录")
+            raise FileNotFoundError(
+                f"未发现在 path_structures 中所指定的文件 id '{index_file_id}' 的记录"
+            )
         elif len(index_query_result) > 1:
             raise ValueError("在查询表 document_indexes 时发现不止一条同 id 的记录")
-        
+
         file_abspath = index_query_result[0][0]
 
         if not file_abspath:
@@ -435,7 +464,9 @@ class ConnHandler():
         fq_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
         fq_cur = fq_db.cursor()
 
-        fq_cur.execute("DELETE from ft_queue WHERE file_id = ?", (index_file_id,)) #  AND done = 0
+        fq_cur.execute(
+            "DELETE from ft_queue WHERE file_id = ? AND done = 0;", (index_file_id,)
+        )  #  AND done = 0
         fq_db.commit()
         fq_db.close()
 
@@ -445,21 +476,21 @@ class ConnHandler():
 
         return True
 
-    def deleteDir(self, dir_id, user: Users, delete_after = 0):
+    def deleteDir(self, dir_id, user: Users, delete_after=0):
         handle_cursor = self.db_conn.cursor()
 
         completed_list = []
         failed_list = []
 
-        new_state = {
-            "code": "deleted",
-            "expire_time": time.time()+delete_after
-        }
+        new_state = {"code": "deleted", "expire_time": time.time() + delete_after}
 
         # 判断是否有权限
 
         # 遍历下级文件夹
-        handle_cursor.execute('SELECT id FROM path_structures WHERE parent_id = ? AND type = "dir";', (dir_id,))
+        handle_cursor.execute(
+            'SELECT id FROM path_structures WHERE parent_id = ? AND type = "dir";',
+            (dir_id,),
+        )
 
         query_subs_result = handle_cursor.fetchall()
 
@@ -470,7 +501,9 @@ class ConnHandler():
             failed_list += sub_result[1]
 
         # 获取本级列表
-        handle_cursor.execute("SELECT id FROM path_structures WHERE parent_id = ?", (dir_id,))
+        handle_cursor.execute(
+            "SELECT id FROM path_structures WHERE parent_id = ?", (dir_id,)
+        )
         query_result = handle_cursor.fetchall()
 
         for i in query_result:
@@ -478,11 +511,17 @@ class ConnHandler():
                 failed_list.append(i[0])
             else:
                 # 删除该目录的直系子级文件和目录
-                handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(new_state), i[0]))
+                handle_cursor.execute(
+                    "UPDATE path_structures SET state = ? WHERE id = ?;",
+                    (json.dumps(new_state), i[0]),
+                )
                 completed_list.append(i[0])
-                
-        if not failed_list: # 仅当删除下级文件未出现错误时才删除目录
-            handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(new_state), dir_id))
+
+        if not failed_list:  # 仅当删除下级文件未出现错误时才删除目录
+            handle_cursor.execute(
+                "UPDATE path_structures SET state = ? WHERE id = ?;",
+                (json.dumps(new_state), dir_id),
+            )
             completed_list.append(dir_id)
         else:
             failed_list.append(dir_id)
@@ -490,7 +529,7 @@ class ConnHandler():
         self.db_conn.commit()
 
         return completed_list, failed_list
-    
+
     def recoverDir(self, dir_id, user: Users):
         # 注意：前后两个函数都不对用户是否有该文件夹权限做判断，应在 handle 部分完成
 
@@ -499,15 +538,15 @@ class ConnHandler():
         completed_list = []
         failed_list = []
 
-        new_state = {
-            "code": "ok",
-            "expire_time": 0
-        }
+        new_state = {"code": "ok", "expire_time": 0}
 
         # 判断是否有权限
 
         # 遍历下级文件夹
-        handle_cursor.execute('SELECT id FROM path_structures WHERE parent_id = ? AND type = "dir";', (dir_id,))
+        handle_cursor.execute(
+            'SELECT id FROM path_structures WHERE parent_id = ? AND type = "dir";',
+            (dir_id,),
+        )
 
         query_subs_result = handle_cursor.fetchall()
 
@@ -518,7 +557,9 @@ class ConnHandler():
             failed_list += sub_result[1]
 
         # 获取本级列表
-        handle_cursor.execute("SELECT id FROM path_structures WHERE parent_id = ?", (dir_id,))
+        handle_cursor.execute(
+            "SELECT id FROM path_structures WHERE parent_id = ?", (dir_id,)
+        )
         query_result = handle_cursor.fetchall()
 
         for i in query_result:
@@ -526,22 +567,29 @@ class ConnHandler():
                 failed_list.append(i[0])
             else:
                 # 恢复该目录的直系子级文件和目录
-                handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(new_state), i[0]))
+                handle_cursor.execute(
+                    "UPDATE path_structures SET state = ? WHERE id = ?;",
+                    (json.dumps(new_state), i[0]),
+                )
                 completed_list.append(i[0])
-                
+
         # 无论是否全部恢复成功都恢复此目录
-        handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(new_state), dir_id))
+        handle_cursor.execute(
+            "UPDATE path_structures SET state = ? WHERE id = ?;",
+            (json.dumps(new_state), dir_id),
+        )
         completed_list.append(dir_id)
 
         self.db_conn.commit()
 
         return completed_list, failed_list
 
-
     def getFileSize(self, path_id):
         g_cur = self.db_conn.cursor()
 
-        g_cur.execute("SELECT type , file_id FROM path_structures WHERE id = ?", (path_id,))
+        g_cur.execute(
+            "SELECT type , file_id FROM path_structures WHERE id = ?", (path_id,)
+        )
 
         query_result = g_cur.fetchall()
 
@@ -549,20 +597,22 @@ class ConnHandler():
             raise FileNotFoundError
         elif len(query_result) > 1:
             raise RuntimeError("在执行 getFileSize 操作时发现数据库出现相同ID的多条记录")
-        
+
         this_file_result = query_result[0]
 
         if this_file_result[0] != "file":
             raise TypeError
-        
+
         index_file_id = this_file_result[1]
 
         if not index_file_id:
             raise RuntimeError("意料外的数据库记录")
-        
-        del this_file_result, query_result # 清除
-        
-        g_cur.execute("SELECT abspath FROM document_indexes WHERE id = ?", (index_file_id, ))
+
+        del this_file_result, query_result  # 清除
+
+        g_cur.execute(
+            "SELECT abspath FROM document_indexes WHERE id = ?", (index_file_id,)
+        )
 
         query_result = g_cur.fetchall()
 
@@ -577,25 +627,22 @@ class ConnHandler():
         g_cur.close()
 
         return os.path.getsize(this_real_file_result[0])
-        
 
     def filterPathProperties(self, properties: dict):
         result = properties
-        
+
         # TODO #11
 
         return result
-    
-    def filterUserProperties(self, properties: dict):
-        return properties # TODO #11
-    
-    def userOperationAuthWrapper(func):
 
+    def filterUserProperties(self, properties: dict):
+        return properties  # TODO #11
+
+    def userOperationAuthWrapper(func):
         @wraps(func)
         def _wrapper(self: Self, *args, **kwargs):
-
             ### 通用用户令牌鉴权开始
-            
+
             # 验证 token
 
             user = Users(self.this_time_username, self.db_conn)
@@ -605,20 +652,18 @@ class ConnHandler():
                 token_secret = ts_file.read()
 
             if not user.ifVaildToken(self.this_time_token, token_secret):
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild token or username"
-                }))
+                self.__send(
+                    json.dumps({"code": -1, "msg": "invaild token or username"})
+                )
                 return
-            
+
             user.load()
 
             ### 结束
-            
-            func(self, *args, **kwargs, user=user) # 仅当上述操作成功该函数才会被执行
-    
-        return _wrapper
 
+            func(self, *args, **kwargs, user=user)  # 仅当上述操作成功该函数才会被执行
+
+        return _wrapper
 
     def verifyUserAccess(self, id, action, user: Users, checkdeny=True, _subcall=False):
         """
@@ -636,17 +681,24 @@ class ConnHandler():
             por_access_rules = por_policy["rules"]["access_rules"]
             por_external_access = por_policy["rules"]["external_access"]
 
-            if not self._verifyAccess(user, action, por_access_rules, por_external_access, checkdeny):
+            if not self._verifyAccess(
+                user, action, por_access_rules, por_external_access, checkdeny
+            ):
                 self.log.logger.debug("PoR 鉴权失败")
                 return False
             else:
                 self.log.logger.debug("PoR 鉴权成功")
                 return True
 
-        self.log.logger.debug(f"verifyUserAccess(): 正在对 用户 {user.username} 访问 id: {id} 的请求 进行鉴权")
+        self.log.logger.debug(
+            f"verifyUserAccess(): 正在对 用户 {user.username} 访问 id: {id} 的请求 进行鉴权"
+        )
 
         db_cur = self.db_conn.cursor()
-        db_cur.execute("SELECT parent_id, access_rules, external_access, type FROM path_structures WHERE id = ?", (id,))
+        db_cur.execute(
+            "SELECT parent_id, access_rules, external_access, type FROM path_structures WHERE id = ?",
+            (id,),
+        )
 
         result = db_cur.fetchall()
 
@@ -655,20 +707,26 @@ class ConnHandler():
         access_rules = json.loads(result[0][1])
         external_access = json.loads(result[0][2])
 
-        if _subcall: # 如果来自子路径调用（这应该表示本路径是一个文件夹）
+        if _subcall:  # 如果来自子路径调用（这应该表示本路径是一个文件夹）
             self.log.logger.debug("_subcall 为真")
 
             if result[0][3] != "dir":
                 raise TypeError("Not a directory: does not support _subcall")
 
-            if not access_rules.get("__subinherit__", True): # 如果设置为下层不继承（对于文件应该无此设置）
+            if not access_rules.get("__subinherit__", True):  # 如果设置为下层不继承（对于文件应该无此设置）
                 self.log.logger.debug("本层设置为下层不继承，返回为真")
                 return True
 
-        if not (action in (_noinherit:=access_rules.get("__noinherit__", []))) and not ("all" in _noinherit): # 判断该目录是否继承上层设置
-                
-            if not (f"deny_{action}" in (_noinherit)) \
-                and (not "deny" in _noinherit) and checkdeny:
+        if not (
+            action in (_noinherit := access_rules.get("__noinherit__", []))
+        ) and not (
+            "all" in _noinherit
+        ):  # 判断该目录是否继承上层设置
+            if (
+                not (f"deny_{action}" in (_noinherit))
+                and (not "deny" in _noinherit)
+                and checkdeny
+            ):
                 # 1. 本层路径继承上层设置；
                 # 2. 本函数的调用者要求检查 deny；
                 self.log.logger.debug("将检查上级目录的 deny 规则")
@@ -676,34 +734,35 @@ class ConnHandler():
             else:
                 parent_checkdeny = False
 
-
-            if (parent:=result[0][0]): # 如果仍有父级
-
+            if parent := result[0][0]:  # 如果仍有父级
                 self.log.logger.debug(f"正在检查其父目录 {parent} 的权限...")
-                if not self.verifyUserAccess(parent, action, user, \
-                                            checkdeny = parent_checkdeny, _subcall=True):
+                if not self.verifyUserAccess(
+                    parent, action, user, checkdeny=parent_checkdeny, _subcall=True
+                ):
                     return False
                 self.log.logger.debug("完毕，无事发生。")
 
-            elif por_policy["inherit_by_subdirectory"]: # 如果没有父级（是根目录）
+            elif por_policy["inherit_by_subdirectory"]:  # 如果没有父级（是根目录）
                 if not self.verifyUserAccess("", action, user, parent_checkdeny, True):
                     return False
 
         else:
             self.log.logger.debug("请求操作在该路径上被设置为不继承上层设置，跳过")
-            
 
         self.log.logger.debug(f"所有访问规则和附加权限记录：{access_rules}, {external_access}")
 
-        if self._verifyAccess(user, action, access_rules, external_access, check_deny=checkdeny):
-            self.log.logger.debug(f"verifyUserAccess(): 用户 {user.username} 对于 id: {id} 的请求 鉴权成功")
+        if self._verifyAccess(
+            user, action, access_rules, external_access, check_deny=checkdeny
+        ):
+            self.log.logger.debug(
+                f"verifyUserAccess(): 用户 {user.username} 对于 id: {id} 的请求 鉴权成功"
+            )
             return True
-                
+
         self.log.logger.debug("校验失败。")
         return False
 
     def handle_v1(self, loaded_recv):
-
         self.log.logger.debug("handle_v1() 函数被调用")
 
         if loaded_recv["request"] == "login":
@@ -714,39 +773,35 @@ class ConnHandler():
                     raise ValueError
             except KeyError:
                 self.log.logger.debug("提交的请求没有提供 data 键值")
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "invaild arguments"
-                }))
+                self.__send(json.dumps({"code": -1, "msg": "invaild arguments"}))
                 return
             except ValueError:
                 self.log.logger.debug("提交的请求没有提供用户名或密码（可能 data 下对应键值为空）")
-                self.__send(json.dumps({
-                    "code": -2,
-                    "msg": "no username or password provided"
-                }))
+                self.__send(
+                    json.dumps({"code": -2, "msg": "no username or password provided"})
+                )
                 return
-            
-            self.log.logger.debug(f"收到登录请求，用户名：{req_username}，密码哈希：{req_password}") # 日志记录密码哈希其实是有泄露危险的
+
+            self.log.logger.debug(
+                f"收到登录请求，用户名：{req_username}，密码哈希：{req_password}"
+            )  # 日志记录密码哈希其实是有泄露危险的
 
             self.handle_login(req_username, req_password)
 
-            return # 如果不返回，那么下面的判断就会被执行了
-        
-        elif loaded_recv["request"] == "disconnect":
+            return  # 如果不返回，那么下面的判断就会被执行了
 
+        elif loaded_recv["request"] == "disconnect":
             try:
                 self.__send("Goodbye")
-            except ConnectionResetError: # 客户端此时断开了也无所谓
+            except ConnectionResetError:  # 客户端此时断开了也无所谓
                 pass
             finally:
                 self.conn.close()
 
             self.log.logger.info(f"{self.addr}: 客户端断开连接")
 
-            sys.exit() # 退出线程
+            sys.exit()  # 退出线程
 
-        
         # 以下的所有请求都应该是需要鉴权的，如果不是请放在上面
         # 如果需要与以下鉴权过程不同的鉴权请放在上面处理
         # 上面部分的每个判断都应该有 return
@@ -760,97 +815,88 @@ class ConnHandler():
             self.this_time_username = attached_username
         except KeyError:
             self.log.logger.debug("请求无效：认证数据不完整或缺失")
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "no full authentication data provided"
-            }))
+            self.__send(
+                json.dumps({"code": -1, "msg": "no full authentication data provided"})
+            )
             return
 
         ### 结束
 
         if loaded_recv["request"] == "refreshToken":
-
             self.log.logger.debug("收到客户端的 refreshToken 请求")
 
             self.handle_refreshToken(attached_username, attached_token)
 
         elif loaded_recv["request"] == "operateFile":
-            
             self.handle_operateFile(loaded_recv)
 
         elif loaded_recv["request"] == "operateDir":
-
             self.handle_operateDir(loaded_recv)
 
+        elif loaded_recv["request"] == "operateUser":
+            self.handle_operateUser(loaded_recv)
+
         elif loaded_recv["request"] == "getDir":
-            
             self.handle_getDir(loaded_recv)
 
         elif loaded_recv["request"] == "getRootDir":
-            
             self.handle_getRootDir(loaded_recv)
 
         elif loaded_recv["request"] == "getPolicy":
-            
             self.handle_getPolicy(loaded_recv)
 
         elif loaded_recv["request"] == "getAvatar":
-
             self.handle_getAvatar(loaded_recv)
 
         elif loaded_recv["request"] == "createFile":
-
             self.handle_createFile(loaded_recv)
 
         elif loaded_recv["request"] == "createUser":
-
             self.handle_createUser(loaded_recv)
 
         elif loaded_recv["request"] == "createDir":
-            
             self.handle_createDir(loaded_recv)
 
         elif loaded_recv["request"] == "createGroup":
-
             self.handle_createGroup(loaded_recv)
 
         elif loaded_recv["request"] == "getUserProperties":
-
             self.handle_getUserProperties(loaded_recv)
 
         elif loaded_recv["request"] == "shutdown":
-
             self.handle_shutdown(loaded_recv)
 
-
         else:
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "unknown request"
-            }))
+            self.__send(json.dumps({"code": -1, "msg": "unknown request"}))
 
         # 收尾
         self.this_time_token = None
-        self.this_time_username = None # 置空
-
+        self.this_time_username = None  # 置空
 
     def handle_login(self, req_username, req_password):
         # 初始化用户对象 User()
         user = Users(req_username, self.db_conn)
         if user.ifExists():
-            if user.ifMatchPassword(req_password): # actually hash
+            if user.ifMatchPassword(req_password):  # actually hash
                 self.log.logger.info(f"{req_username} 密码正确，准予访问")
-                user.load() # 载入用户信息
+                user.load()  # 载入用户信息
 
                 # 读取 token_secret
-                with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                with open(
+                    f"{self.root_abspath}/content/auth/token_secret", "r"
+                ) as ts_file:
                     token_secret = ts_file.read()
 
-                self.__send(json.dumps({
-                    "code": 0,
-                    "token": user.generateUserToken(("all"), 3600, token_secret),
-                    "ftp_port": self.config["connect"]["ftp_port"]
-                })
+                self.__send(
+                    json.dumps(
+                        {
+                            "code": 0,
+                            "token": user.generateUserToken(
+                                ("all"), 3600, token_secret
+                            ),
+                            "ftp_port": self.config["connect"]["ftp_port"],
+                        }
+                    )
                 )
 
             else:
@@ -868,11 +914,7 @@ class ConnHandler():
                 else:
                     fail_msg = "username or password incorrect"
 
-                self.__send(json.dumps({
-                    "code": 401,
-                    "msg": fail_msg
-                })
-                )
+                self.__send(json.dumps({"code": 401, "msg": fail_msg}))
         else:
             if self.config["security"]["show_login_fail_details"]:
                 fail_msg = "user does not exist"
@@ -886,48 +928,36 @@ class ConnHandler():
                 self.log.logger.debug(f"正根据登录策略睡眠 {sleep_for_fail} 秒")
                 time.sleep(sleep_for_fail)
 
-            self.__send(json.dumps({
-                "code": 401,
-                "msg": fail_msg
-            })
-            )
+            self.__send(json.dumps({"code": 401, "msg": fail_msg}))
 
     def handle_logout(self):
         pass
 
     def handle_refreshToken(self, req_username, old_token):
-        user = Users(req_username, self.db_conn) # 初始化用户对象
+        user = Users(req_username, self.db_conn)  # 初始化用户对象
         # 读取 token_secret
         with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
             token_secret = ts_file.read()
 
-        if (new_token:=user.refreshUserToken(old_token, token_secret, vaild_time=3600)): # return: {token} , False
-            self.__send(json.dumps(
-                {
-                    "code": 0,
-                    "msg": "ok",
-                    "token": new_token 
-                }
-            ))
+        if new_token := user.refreshUserToken(
+            old_token, token_secret, vaild_time=3600
+        ):  # return: {token} , False
+            self.__send(json.dumps({"code": 0, "msg": "ok", "token": new_token}))
         else:
-            self.__send(json.dumps({
-                "code": 401,
-                "msg": "invaild token or username"
-            }))
+            self.__send(json.dumps({"code": 401, "msg": "invaild token or username"}))
 
     @userOperationAuthWrapper
-    def handle_getDir(self, recv, user: object): # 诸如此类带 user 参数的才可使用 Wrapper
+    def handle_getDir(self, recv, user: object):  # 诸如此类带 user 参数的才可使用 Wrapper
         path_id = recv["data"].get("id")
 
         if not path_id:
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "no path_id provided"
-            }))
+            self.__send(json.dumps({"code": -1, "msg": "no path_id provided"}))
 
         handle_cursor = self.db_conn.cursor()
 
-        handle_cursor.execute("SELECT type, parent_id FROM path_structures WHERE id = ?" , (path_id,))
+        handle_cursor.execute(
+            "SELECT type, parent_id FROM path_structures WHERE id = ?", (path_id,)
+        )
 
         result = handle_cursor.fetchone()
 
@@ -935,39 +965,37 @@ class ConnHandler():
             tg_type = result[0]
             parent_id = result[1]
         else:
-            self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "no such file or directory"
-                }))
+            self.__send(json.dumps({"code": -1, "msg": "no such file or directory"}))
             return
-        
+
         del result
-        
+
         if tg_type == "file":
-            self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "type 'file' does not have a dir function"
-                }))
+            self.__send(
+                json.dumps(
+                    {"code": -1, "msg": "type 'file' does not have a dir function"}
+                )
+            )
             return
-        
+
         elif tg_type == "dir":
             if not self.verifyUserAccess(path_id, "read", user):
-                self.__send(json.dumps({
-                    "code": 403,
-                    "msg": "permission denied"
-                }))
+                self.__send(json.dumps({"code": 403, "msg": "permission denied"}))
                 self.log.logger.debug("权限校验失败：无权访问")
                 return
-            
 
-            handle_cursor.execute("SELECT id, name, type, properties FROM path_structures WHERE parent_id = ?" , (path_id,))
+            handle_cursor.execute(
+                "SELECT id, name, type, properties FROM path_structures WHERE parent_id = ?",
+                (path_id,),
+            )
             all_result = handle_cursor.fetchall()
 
             dir_result = dict()
 
             for i in all_result:
-
-                if not self.verifyUserAccess(i[0], "read", user): # 检查该目录下的文件是否有权访问，如无则隐藏
+                if not self.verifyUserAccess(
+                    i[0], "read", user
+                ):  # 检查该目录下的文件是否有权访问，如无则隐藏
                     if self.config["security"]["hide_when_no_access"]:
                         continue
                     else:
@@ -984,15 +1012,17 @@ class ConnHandler():
                 dir_result[i[0]] = {
                     "name": i[1],
                     "type": i[2],
-                    "properties": filtered_properties
+                    "properties": filtered_properties,
                 }
 
             por_policy = Policies("permission_on_rootdir", self.db_conn)
 
             if parent_id:
-
-                if self.verifyUserAccess(parent_id, "read", user): # 检查是否有权访问父级目录
-                    handle_cursor.execute("SELECT name, type, properties FROM path_structures WHERE parent_id = ?" , (path_id,))
+                if self.verifyUserAccess(parent_id, "read", user):  # 检查是否有权访问父级目录
+                    handle_cursor.execute(
+                        "SELECT name, type, properties FROM path_structures WHERE parent_id = ?",
+                        (path_id,),
+                    )
                     parent_result = handle_cursor.fetchone()
 
                     parent_properties = json.loads(parent_result[2])
@@ -1004,16 +1034,18 @@ class ConnHandler():
                         "name": parent_result[0],
                         "type": "dir",
                         "parent": True,
-                        "properties": self.filterPathProperties(parent_properties)
+                        "properties": self.filterPathProperties(parent_properties),
                     }
 
-            else: # 如果父级目录是根目录，检查是否有权访问根目录
+            else:  # 如果父级目录是根目录，检查是否有权访问根目录
                 self.log.logger.debug(f"目录 {path_id} 的上级目录为根目录。正在检查用户是否有权访问根目录...")
 
                 por_access_rules = por_policy["rules"]["access_rules"]
                 por_external_access = por_policy["rules"]["external_access"]
 
-                if not self._verifyAccess(user, "read", por_access_rules, por_external_access, True):
+                if not self._verifyAccess(
+                    user, "read", por_access_rules, por_external_access, True
+                ):
                     self.log.logger.debug("用户无权访问根目录")
                 else:
                     self.log.logger.debug("根目录鉴权成功")
@@ -1026,18 +1058,13 @@ class ConnHandler():
                         # "properties": self.filterPathProperties(parent_properties)
                     }
 
-
-            self.__send(json.dumps({
-                "code": 0,
-                "dir_data": dir_result
-            }))
+            self.__send(json.dumps({"code": 0, "dir_data": dir_result}))
 
         else:
-            self.log.logger.error(f"错误：数据库中 path_id 为 {path_id} 的条目的 type 为意料之外的值： {tg_type}")
-            self.__send(json.dumps({
-                "code": 500,
-                "msg": "internal server error"
-            }))
+            self.log.logger.error(
+                f"错误：数据库中 path_id 为 {path_id} 的条目的 type 为意料之外的值： {tg_type}"
+            )
+            self.__send(json.dumps({"code": 500, "msg": "internal server error"}))
 
     @userOperationAuthWrapper
     def handle_getRootDir(self, loaded_recv, user: Users):
@@ -1046,26 +1073,27 @@ class ConnHandler():
         por_access_rules = por_policy["rules"]["access_rules"]
         por_external_access = por_policy["rules"]["external_access"]
 
-        if not self._verifyAccess(user, "read", por_access_rules, por_external_access, True):
+        if not self._verifyAccess(
+            user, "read", por_access_rules, por_external_access, True
+        ):
             self.log.logger.debug("用户无权访问根目录")
-            self.__send(json.dumps({
-                "code": 403,
-                "msg": "forbidden"
-            }))
+            self.__send(json.dumps({"code": 403, "msg": "forbidden"}))
             return
         else:
             self.log.logger.debug("根目录鉴权成功")
 
         handle_cursor = self.db_conn.cursor()
 
-        handle_cursor.execute("SELECT id, name, type, properties FROM path_structures WHERE parent_id = ?" , ("",))
+        handle_cursor.execute(
+            "SELECT id, name, type, properties FROM path_structures WHERE parent_id = ?",
+            ("",),
+        )
         all_result = handle_cursor.fetchall()
 
         dir_result = dict()
 
         for i in all_result:
-
-            if not self.verifyUserAccess(i[0], "read", user): # 检查该目录下的文件是否有权访问，如无则隐藏
+            if not self.verifyUserAccess(i[0], "read", user):  # 检查该目录下的文件是否有权访问，如无则隐藏
                 if self.config["security"]["hide_when_no_access"]:
                     continue
                 else:
@@ -1082,36 +1110,34 @@ class ConnHandler():
             dir_result[i[0]] = {
                 "name": i[1],
                 "type": i[2],
-                "properties": filtered_properties
+                "properties": filtered_properties,
             }
 
+        self.__send(json.dumps({"code": 0, "dir_data": dir_result}))
 
-        self.__send(json.dumps({
-                "code": 0,
-                "dir_data": dir_result
-            }))
-        
         return
-
-
 
     @userOperationAuthWrapper
     def handle_getPolicy(self, loaded_recv, user: Users):
         req_policy_id = loaded_recv["data"]["policy_id"]
 
-        action = "read" # "getPolicy"，所以目前 action 就是 read
+        action = "read"  # "getPolicy"，所以目前 action 就是 read
 
         handle_cursor = self.db_conn.cursor()
-        handle_cursor.execute("SELECT content, access_rules, external_access FROM policies WHERE id = ?", (req_policy_id,))
+        handle_cursor.execute(
+            "SELECT content, access_rules, external_access FROM policies WHERE id = ?",
+            (req_policy_id,),
+        )
 
         fetched = handle_cursor.fetchone()
         # 不是很想再写判断是否有重复ID的逻辑，反正出了问题看着办吧，这不是我要考虑的事
 
-        if not fetched: # does not exist
-            self.__send(json.dumps({
-                "code": 404,
-                "msg": "the policy you've requested does not exist"
-            }))
+        if not fetched:  # does not exist
+            self.__send(
+                json.dumps(
+                    {"code": 404, "msg": "the policy you've requested does not exist"}
+                )
+            )
             return
 
         content = json.loads(fetched[0])
@@ -1119,259 +1145,272 @@ class ConnHandler():
         external_access = json.loads(fetched[2])
 
         if not self._verifyAccess(user, action, access_rules, external_access):
-            self.__send(json.dumps({
-                "code": 403,
-                "msg": "forbidden"
-            }))
+            self.__send(json.dumps({"code": 403, "msg": "forbidden"}))
         else:
-            self.__send(json.dumps({
-                "code": 0,
-                "data": content
-            }))
+            self.__send(json.dumps({"code": 0, "data": content}))
 
         return
 
-
     @userOperationAuthWrapper
     def handle_getAvatar(self, loaded_recv, user: Users):
-        if not (avatar_username:=loaded_recv["data"].get("username")):
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "needs a username"
-            }))
+        if not (avatar_username := loaded_recv["data"].get("username")):
+            self.__send(json.dumps({"code": -1, "msg": "needs a username"}))
             return
-        
+
         get_avatar_user = Users(avatar_username, self.db_conn)
 
         if not get_avatar_user.ifExists():
-            self.log.logger.debug(f"用户 {user.username} 试图请求帐户 {avatar_username} 的头像，但这个用户并不存在。")
-            self.__send(json.dumps(
-                {
-                    "code": 404,
-                    "msg": "not found"
-                }
-            ))
+            self.log.logger.debug(
+                f"用户 {user.username} 试图请求帐户 {avatar_username} 的头像，但这个用户并不存在。"
+            )
+            self.__send(json.dumps({"code": 404, "msg": "not found"}))
             return
 
         avatar_policy = Policies("avatars", self.db_conn)
-        
+
         ### TODO #9 增加用户权限对头像获取权限的支持 - done
 
         gau_access_rules = get_avatar_user["publicity"].get("access_rules", {})
         gau_external_access = get_avatar_user["publicity"].get("external_access", {})
 
         if get_avatar_user["publicity"].get("restricted", False):
-            if (not avatar_policy["allow_access_without_permission"])\
-            and (not self._verifyAccess(user, "read", gau_access_rules, gau_external_access))\
-            and (not user.hasRights(("super_useravatar",))):
-                self.__send(json.dumps({
-                    "code": 403,
-                    "msg": "forbidden"
-                }))
+            if (
+                (not avatar_policy["allow_access_without_permission"])
+                and (
+                    not self._verifyAccess(
+                        user, "read", gau_access_rules, gau_external_access
+                    )
+                )
+                and (not user.hasRights(("super_useravatar",)))
+            ):
+                self.__send(json.dumps({"code": 403, "msg": "forbidden"}))
                 return
-            
-        if (avatar_file_id:=get_avatar_user["avatar"].get("file_id", None)):
+
+        if avatar_file_id := get_avatar_user["avatar"].get("file_id", None):
             task_id, task_token, t_filename = self.createFileTask(avatar_file_id)
-            self.__send(json.dumps({
-                "code": 0,
-                "msg": "ok",
-                "data": {
-                    "task_id": task_id,
-                    "task_token": task_token,
-                    "t_filename": t_filename
-                }
-            }))
-        else:
-            if (default_avatar_id:=avatar_policy["default_avatar"]):
-                task_id, task_token, t_filename, expire_time = self.createFileTask(default_avatar_id)
-
-                self.log.logger.debug(f"用户 {user.username} 请求帐户 {avatar_username} 的头像，返回为默认头像。")
-
-                self.__send(json.dumps({
-                    "code": 0,
-                    "msg": "ok",
-                    "data": {
-                        "task_id": task_id,
-                        "task_token": task_token,
-                        "t_filename": t_filename,
-                        "expire_time": expire_time
+            self.__send(
+                json.dumps(
+                    {
+                        "code": 0,
+                        "msg": "ok",
+                        "data": {
+                            "task_id": task_id,
+                            "task_token": task_token,
+                            "t_filename": t_filename,
+                        },
                     }
-                }))
+                )
+            )
+        else:
+            if default_avatar_id := avatar_policy["default_avatar"]:
+                task_id, task_token, t_filename, expire_time = self.createFileTask(
+                    default_avatar_id
+                )
+
+                self.log.logger.debug(
+                    f"用户 {user.username} 请求帐户 {avatar_username} 的头像，返回为默认头像。"
+                )
+
+                self.__send(
+                    json.dumps(
+                        {
+                            "code": 0,
+                            "msg": "ok",
+                            "data": {
+                                "task_id": task_id,
+                                "task_token": task_token,
+                                "t_filename": t_filename,
+                                "expire_time": expire_time,
+                            },
+                        }
+                    )
+                )
             else:
-                self.log.logger.debug(f"用户 {user.username} 试图请求帐户 {avatar_username} 的头像，但用户未设置头像，且策略指定的默认头像为空。")
-                self.__send(json.dumps({
-                    "code": 404,
-                    "msg": "not found",
-                    "data": {}
-                }))
+                self.log.logger.debug(
+                    f"用户 {user.username} 试图请求帐户 {avatar_username} 的头像，但用户未设置头像，且策略指定的默认头像为空。"
+                )
+                self.__send(json.dumps({"code": 404, "msg": "not found", "data": {}}))
 
     @userOperationAuthWrapper
     def handle_createFile(self, loaded_recv, user: Users):
-
         if "data" not in loaded_recv:
-            self.__send(json.dumps({
-                self.RES_MISSING_ARGUMENT
-            }))
+            self.__send(json.dumps({self.RES_MISSING_ARGUMENT}))
 
-        target_directory_id = loaded_recv["data"].get("directory_id", "") # fallback to rootdir
+        target_directory_id = loaded_recv["data"].get(
+            "directory_id", ""
+        )  # fallback to rootdir
         target_file_path_id = loaded_recv["data"].get("file_id", None)
-        target_filename = loaded_recv["data"].get("filename", f"Untitled-{int(time.time())}")
+        target_filename = loaded_recv["data"].get(
+            "filename", f"Untitled-{int(time.time())}"
+        )
 
         if not target_file_path_id:
-            self.__send(json.dumps(
-                self.RES_MISSING_ARGUMENT
-            ))
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
+
         handle_cursor = self.db_conn.cursor()
 
-        handle_cursor.execute("SELECT * FROM path_structures WHERE id = ?", (target_file_path_id,))
+        handle_cursor.execute(
+            "SELECT * FROM path_structures WHERE id = ?", (target_file_path_id,)
+        )
 
         query_result = handle_cursor.fetchall()
 
         if query_result:
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "file or directory exists.",
-                "__hint__": "if you want to override a file, use 'operateFile' instead."
-            }))
+            self.__send(
+                json.dumps(
+                    {
+                        "code": -1,
+                        "msg": "file or directory exists.",
+                        "__hint__": "if you want to override a file, use 'operateFile' instead.",
+                    }
+                )
+            )
             return
-        
-        del query_result # 清除
 
-        if target_directory_id: # 如果不是根目录
+        del query_result  # 清除
 
-            handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (target_directory_id,))
+        if target_directory_id:  # 如果不是根目录
+            handle_cursor.execute(
+                "SELECT type FROM path_structures WHERE id = ?", (target_directory_id,)
+            )
 
             dir_query_result = handle_cursor.fetchall()
 
             if not dir_query_result:
-                self.__send(json.dumps({
-                    "code": 404,
-                    "msg": "target directory not found"
-                }))
+                self.__send(
+                    json.dumps({"code": 404, "msg": "target directory not found"})
+                )
                 return
             elif len(dir_query_result) >= 1:
                 raise RuntimeError("数据库出现了不止一条同id的记录")
-            
-            if (d_id_type:=dir_query_result[0][0]) != "dir":
-                self.log.logger.debug(f"用户试图请求在 id 为 {target_directory_id} 的目录下创建文件，\
-                                    但它事实上不是一个目录（{d_id_type}）")
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "not a directory"
-                }))
+
+            if (d_id_type := dir_query_result[0][0]) != "dir":
+                self.log.logger.debug(
+                    f"用户试图请求在 id 为 {target_directory_id} 的目录下创建文件，\
+                                    但它事实上不是一个目录（{d_id_type}）"
+                )
+                self.__send(json.dumps({"code": -1, "msg": "not a directory"}))
                 return
-            
+
             if not self.verifyUserAccess(target_directory_id, "write", user):
-                self.__send(json.dumps(
-                    self.RES_ACCESS_DENIED
-                ))
+                self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
-            
+
         else:
             por_policy = Policies("permission_on_rootdir", self.db_conn)
 
             por_access_rules = por_policy["rules"]["access_rules"]
             por_external_access = por_policy["rules"]["external_access"]
 
-            if not self._verifyAccess(user, "write", por_access_rules, por_external_access, True):
+            if not self._verifyAccess(
+                user, "write", por_access_rules, por_external_access, True
+            ):
                 self.log.logger.debug("用户无权访问根目录")
                 self.__send(self.RES_ACCESS_DENIED)
                 return
             else:
                 self.log.logger.debug("根目录鉴权成功")
 
-            
-        
         # 开始创建文件
 
-        index_file_id = secrets.token_hex(64) # 存储在 document_indexes 中
+        index_file_id = secrets.token_hex(64)  # 存储在 document_indexes 中
         real_filename = secrets.token_hex(16)
 
         today = datetime.date.today()
 
-        destination_path = f"{self.root_abspath}/content/files/{today.year}/{today.month}"
+        destination_path = (
+            f"{self.root_abspath}/content/files/{today.year}/{today.month}"
+        )
 
-        os.makedirs(destination_path, exist_ok=True) # 即使文件夹已存在也加以继续
+        os.makedirs(destination_path, exist_ok=True)  # 即使文件夹已存在也加以继续
 
         with open(f"{destination_path}/{real_filename}", "w") as new_file:
             pass
 
         # 注册数据库条目
 
-        handle_cursor.execute("INSERT INTO document_indexes (id, abspath) VALUES (?, ?)", \
-                              (index_file_id, destination_path+"/"+real_filename))
-        
-        handle_cursor.execute("INSERT INTO path_structures \
+        handle_cursor.execute(
+            "INSERT INTO document_indexes (id, abspath) VALUES (?, ?)",
+            (index_file_id, destination_path + "/" + real_filename),
+        )
+
+        handle_cursor.execute(
+            "INSERT INTO path_structures \
                               (id , name , owner , parent_id , type , file_id , access_rules, external_access, properties, state) \
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                              (target_file_path_id, target_filename, json.dumps((("user", user.username),)), target_directory_id, 
-                               "file", index_file_id, r"{}", r"{}", json.dumps({
-                                   "created_time": time.time()
-                               }), json.dumps({
-                                   "code": "ok",
-                                   "expire_time": 0
-                               }) ))
-        
+            (
+                target_file_path_id,
+                target_filename,
+                json.dumps((("user", user.username),)),
+                target_directory_id,
+                "file",
+                index_file_id,
+                r"{}",
+                r"{}",
+                json.dumps({"created_time": time.time()}),
+                json.dumps({"code": "ok", "expire_time": 0}),
+            ),
+        )
+
         self.db_conn.commit()
         handle_cursor.close()
 
         # 创建任务
-        task_id, task_token, t_filename, expire_time = self.createFileTask(index_file_id, operation="write")
+        task_id, task_token, t_filename, expire_time = self.createFileTask(
+            index_file_id, operation="write"
+        )
 
-        self.__send(json.dumps({
-            "code": 0,
-            "msg": "file created",
-            "data": {
-                "task_id": task_id,
-                "task_token": task_token,
-                "t_filename": t_filename,
-                "expire_time": expire_time
-            }
-        }))
+        self.__send(
+            json.dumps(
+                {
+                    "code": 0,
+                    "msg": "file created",
+                    "data": {
+                        "task_id": task_id,
+                        "task_token": task_token,
+                        "t_filename": t_filename,
+                        "expire_time": expire_time,
+                    },
+                }
+            )
+        )
 
         return
 
     @userOperationAuthWrapper
     def handle_operateFile(self, loaded_recv, user: Users):
-        
         if "data" not in loaded_recv:
-            self.__send(json.dumps(
-                self.RES_MISSING_ARGUMENT
-            ))
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
+
         if not loaded_recv["data"].get("action", None):
-            self.__send(json.dumps(
-                self.RES_MISSING_ARGUMENT
-            ))
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
 
-
-        file_id = loaded_recv["data"].get("file_id", None) # 伪路径文件 ID
+        file_id = loaded_recv["data"].get("file_id", None)  # 伪路径文件 ID
         view_deleted = loaded_recv["data"].get("view_deleted", False)
-        
+
         if not file_id:
-            self.__send(json.dumps(
-                self.RES_MISSING_ARGUMENT
-            ))
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
+
         if loaded_recv["data"]["action"] == "recover":
-            view_deleted = True # 若要恢复文件，则必须有权访问被删除的文件
-        
-        if view_deleted: # 如果启用 view_deleted 选项
+            view_deleted = True  # 若要恢复文件，则必须有权访问被删除的文件
+
+        if view_deleted:  # 如果启用 view_deleted 选项
             if not user.hasRights(("view_deleted",)):
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
 
         handle_cursor = self.db_conn.cursor()
 
-        handle_cursor.execute("SELECT name, parent_id, type, file_id, access_rules, external_access, properties, state \
-                              FROM path_structures WHERE id = ?", \
-                              (file_id,))
-        
+        handle_cursor.execute(
+            "SELECT name, parent_id, type, file_id, access_rules, external_access, properties, state \
+                              FROM path_structures WHERE id = ?",
+            (file_id,),
+        )
+
         result = handle_cursor.fetchall()
 
         # print(result)
@@ -1379,105 +1418,128 @@ class ConnHandler():
         if len(result) > 1:
             raise ValueError("Invaild query result length")
         elif len(result) < 1:
-            self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "no such file"
-                }))
+            self.__send(json.dumps({"code": -1, "msg": "no such file"}))
             return
         else:
-            if (file_state:=json.loads(result[0][7]))["code"] == "deleted": 
+            if (file_state := json.loads(result[0][7]))["code"] == "deleted":
                 # 如下，file_state 不一定是 file 的 state，但由于安全性原因只能先写这个判断
                 if not view_deleted:
-                    self.__send(
-                        json.dumps(self.RES_NOT_FOUND)
-                    )
+                    self.__send(json.dumps(self.RES_NOT_FOUND))
                     return
 
             if result[0][2] != "file":
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "not a file"
-                }))
+                self.__send(json.dumps({"code": -1, "msg": "not a file"}))
                 return
-            
+
             req_action = loaded_recv["data"]["action"]
 
             self.log.logger.debug(f"请求对文件的操作：{req_action}")
 
-            if req_action in ["read", "write", "rename", "delete", "permanently_delete", "recover", "move", "change_id"]:
-
+            if req_action in [
+                "read",
+                "write",
+                "rename",
+                "delete",
+                "permanently_delete",
+                "recover",
+                "move",
+                "change_id",
+            ]:
                 # 注意：write 操作仅支持覆盖，创建请使用 uploadFile
 
-                if not self.verifyUserAccess(file_id, req_action, user, _subcall = False):
-                    self.__send(json.dumps({
-                        "code": 403,
-                        "msg": "permission denied"
-                    }))
+                if not self.verifyUserAccess(file_id, req_action, user, _subcall=False):
+                    self.__send(json.dumps({"code": 403, "msg": "permission denied"}))
                     self.log.logger.debug("权限校验失败：无权执行所请求的操作")
                     return
-                
+
                 query_file_id = result[0][3]
-                
+
                 if req_action == "read":
                     # 权限检查已在上一步完成
 
-                    task_id, task_token, fake_file_id, expire_time = \
-                        self.createFileTask(query_file_id, operation="read", expire_time=time.time()+3600)
+                    (
+                        task_id,
+                        task_token,
+                        fake_file_id,
+                        expire_time,
+                    ) = self.createFileTask(
+                        query_file_id, operation="read", expire_time=time.time() + 3600
+                    )
 
                     response = {
                         "code": 0,
                         "msg": "ok",
                         "data": {
                             "task_id": task_id,
-                            "task_token": task_token, # original hash after sha256
+                            "task_token": task_token,  # original hash after sha256
                             "expire_time": expire_time,
-                            "t_filename": fake_file_id
-                        }
+                            "t_filename": fake_file_id,
+                        },
                     }
 
                     self.__send(json.dumps(response))
 
-                
                 elif req_action == "write":
+                    do_force_write = loaded_recv["data"].get(
+                        "force_write", False
+                    )  # 伪路径文件 ID
 
-                    do_force_write = loaded_recv["data"].get("force_write", False) # 伪路径文件 ID
-
-                    if file_state_code:=file_state["code"] != "ok":
+                    if file_state_code := file_state["code"] != "ok":
                         if file_state_code == "locked":
-                            self.__send(json.dumps({
-                                "code": -1,
-                                "msg": "file locked",
-                                "data": {
-                                    "expire_time": file_state.get("expire_time", 0)
-                                }
-                            }))
-                            
+                            self.__send(
+                                json.dumps(
+                                    {
+                                        "code": -1,
+                                        "msg": "file locked",
+                                        "data": {
+                                            "expire_time": file_state.get(
+                                                "expire_time", 0
+                                            )
+                                        },
+                                    }
+                                )
+                            )
+
                         elif file_state_code == "deleted":
-                            self.__send(json.dumps({
-                                "code": -1,
-                                "msg": "The file has been marked for deletion, please restore it first",
-                                "data": {
-                                    "expire_time": file_state.get("expire_time", 0)
-                                }
-                            }))
-                            
+                            self.__send(
+                                json.dumps(
+                                    {
+                                        "code": -1,
+                                        "msg": "The file has been marked for deletion, please restore it first",
+                                        "data": {
+                                            "expire_time": file_state.get(
+                                                "expire_time", 0
+                                            )
+                                        },
+                                    }
+                                )
+                            )
+
                         else:
-                            self.__send(json.dumps({
-                                "code": -1,
-                                "msg": "unexpected file status"
-                            }))
-                            
+                            self.__send(
+                                json.dumps(
+                                    {"code": -1, "msg": "unexpected file status"}
+                                )
+                            )
+
                         return
-                    
+
                     try:
-                        task_id, task_token, fake_file_id, expire_time = \
-                            self.createFileTask(query_file_id, operation="write", 
-                                                expire_time=time.time()+3600, force_write=do_force_write)
+                        (
+                            task_id,
+                            task_token,
+                            fake_file_id,
+                            expire_time,
+                        ) = self.createFileTask(
+                            query_file_id,
+                            operation="write",
+                            expire_time=time.time() + 3600,
+                            force_write=do_force_write,
+                        )
                     except PendingWriteFileError:
-                        self.__send(json.dumps({
-                            "code": -1,
-                            "msg": "file already in use"
-                        }))
+                        self.__send(
+                            json.dumps({"code": -1, "msg": "file already in use"})
+                        )
                         return
 
                     response = {
@@ -1485,82 +1547,89 @@ class ConnHandler():
                         "msg": "ok",
                         "data": {
                             "task_id": task_id,
-                            "task_token": task_token, # original hash after sha256
+                            "task_token": task_token,  # original hash after sha256
                             "expire_time": expire_time,
-                            "t_filename": fake_file_id # 这个ID是客户端上传文件时应当使用的文件名
-                        }
+                            "t_filename": fake_file_id,  # 这个ID是客户端上传文件时应当使用的文件名
+                        },
                     }
 
                     self.__send(json.dumps(response))
 
-                
                 elif req_action == "rename":
-
                     new_filename = loaded_recv["data"].get("new_filename", None)
-                    
-                    if not new_filename: # filename 不能为空
+
+                    if not new_filename:  # filename 不能为空
                         self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
                         return
 
-                    if file_state_code:=file_state["code"] != "ok":
+                    if file_state_code := file_state["code"] != "ok":
                         if file_state_code == "locked":
-                            self.__send(json.dumps({
-                                "code": -1,
-                                "msg": "file locked",
-                                "data": {
-                                    "expire_time": file_state.get("expire_time", 0)
-                                }
-                            }))
+                            self.__send(
+                                json.dumps(
+                                    {
+                                        "code": -1,
+                                        "msg": "file locked",
+                                        "data": {
+                                            "expire_time": file_state.get(
+                                                "expire_time", 0
+                                            )
+                                        },
+                                    }
+                                )
+                            )
                             return
 
-                    
-                    handle_cursor.execute("UPDATE path_structures SET name = ? WHERE id = ?;", (new_filename, file_id))
+                    handle_cursor.execute(
+                        "UPDATE path_structures SET name = ? WHERE id = ?;",
+                        (new_filename, file_id),
+                    )
 
                     self.db_conn.commit()
 
-                    self.__send(json.dumps({
-                        "code": 0,
-                        "msg": "success"
-                    }))
+                    self.__send(json.dumps({"code": 0, "msg": "success"}))
 
-                
                 elif req_action == "delete":
                     recycle_policy = Policies("recycle", self.db_conn)
                     delete_after_marked_time = recycle_policy["deleteAfterMarked"]
 
                     if file_state["code"] == "deleted":
-                        self.__send(json.dumps({
-                            "code": -1, 
-                            "msg": "The file has been marked for deletion"
-                        }))
+                        self.__send(
+                            json.dumps(
+                                {
+                                    "code": -1,
+                                    "msg": "The file has been marked for deletion",
+                                }
+                            )
+                        )
                         return
 
                     new_state = {
                         "code": "deleted",
-                        "expire_time": time.time()+delete_after_marked_time
+                        "expire_time": time.time() + delete_after_marked_time,
                     }
 
-                    handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(new_state), file_id))
+                    handle_cursor.execute(
+                        "UPDATE path_structures SET state = ? WHERE id = ?;",
+                        (json.dumps(new_state), file_id),
+                    )
 
                     self.db_conn.commit()
 
                     self.__send(json.dumps(self.RES_OK))
 
                 elif req_action == "recover":
-
                     if file_state["code"] != "deleted":
-                        self.__send(json.dumps({
-                            "code": -1, 
-                            "msg": "File is not deleted"
-                        }))
+                        self.__send(
+                            json.dumps({"code": -1, "msg": "File is not deleted"})
+                        )
                         return
-                    
-                    recovered_state = {
-                        "code": "ok",
-                        "expire_time": 0
-                    }
 
-                    handle_cursor.execute("UPDATE path_structures SET state = ? WHERE id = ?;", (json.dumps(recovered_state), file_id))
+                    recovered_state = {"code": "ok", "expire_time": 0}
+
+                    handle_cursor.execute(
+                        "UPDATE path_structures SET state = ? WHERE id = ?;",
+                        (json.dumps(recovered_state), file_id),
+                    )
                     self.db_conn.commit()
 
                     self.__send(json.dumps(self.RES_OK))
@@ -1571,18 +1640,20 @@ class ConnHandler():
                     self.__send(json.dumps(self.RES_OK))
 
                 elif req_action == "move":
-
                     new_parent_id = loaded_recv["data"].get("new_parent", None)
 
                     if new_parent_id == None:
                         self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
                         return
-                    
+
                     # 判断新目录是否存在
 
                     handle_cursor = self.db_conn.cursor()
 
-                    handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (new_parent_id, ))
+                    handle_cursor.execute(
+                        "SELECT type FROM path_structures WHERE id = ?",
+                        (new_parent_id,),
+                    )
 
                     query_result = handle_cursor.fetchall()
 
@@ -1591,49 +1662,51 @@ class ConnHandler():
                         return
                     elif len(query_result) != 1:
                         raise ValueError("意料之外的记录数量")
-                    
+
                     if query_result[0][0] != "dir":
-                        self.__send(json.dumps({
-                            "code": -1,
-                            "msg": "新的路径不是一个目录"
-                        }))
+                        self.__send(json.dumps({"code": -1, "msg": "新的路径不是一个目录"}))
                         return
-                    
+
                     # 调取原目录
 
-                    handle_cursor.execute("SELECT parent_id FROM path_structures WHERE id = ?", (query_file_id, ))
+                    handle_cursor.execute(
+                        "SELECT parent_id FROM path_structures WHERE id = ?",
+                        (query_file_id,),
+                    )
 
                     old_parent_result = handle_cursor.fetchone()
 
                     old_parent_id = old_parent_result[0]
 
-                    
-                    if not self.verifyUserAccess(new_parent_id, "write", user)\
-                        or not self.verifyUserAccess(old_parent_id, "delete", user): 
+                    if not self.verifyUserAccess(
+                        new_parent_id, "write", user
+                    ) or not self.verifyUserAccess(old_parent_id, "delete", user):
                         # 移动操作实际上是向新目录写入文件，并删除旧目录文件
-                        
+
                         self.__send(json.dumps(self.RES_ACCESS_DENIED))
                         return
-                    
+
                     # 执行操作
 
-                    handle_cursor.execute("UPDATE path_structures SET parent_id = ? WHERE id = ?;", (new_parent_id, query_file_id))
+                    handle_cursor.execute(
+                        "UPDATE path_structures SET parent_id = ? WHERE id = ?;",
+                        (new_parent_id, query_file_id),
+                    )
 
                     self.db_conn.commit()
 
                     self.__send(json.dumps(self.RES_OK))
 
                     return
-                
-                elif req_action == "change_id":
 
+                elif req_action == "change_id":
                     if not user.hasRights(("change_id",)):
                         self.__send(json.dumps(self.RES_ACCESS_DENIED))
                         return
-                
+
                     new_id = loaded_recv["data"].get("new_id", None)
 
-                    if not new_id: # id 不能为空
+                    if not new_id:  # id 不能为空
                         self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
                         return
 
@@ -1641,20 +1714,22 @@ class ConnHandler():
 
                     handle_cursor = self.db_conn.cursor()
 
-                    handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (new_id, ))
+                    handle_cursor.execute(
+                        "SELECT type FROM path_structures WHERE id = ?", (new_id,)
+                    )
 
                     result = handle_cursor.fetchall()
 
                     if result:
-                        self.__send(json.dumps({
-                            "code": -1,
-                            "msg": "id exists"
-                        }))
+                        self.__send(json.dumps({"code": -1, "msg": "id exists"}))
                         return
-                    
+
                     # 执行操作
 
-                    handle_cursor.execute("UPDATE path_structures SET id = ? WHERE id = ?;", (new_id, query_file_id))
+                    handle_cursor.execute(
+                        "UPDATE path_structures SET id = ? WHERE id = ?;",
+                        (new_id, query_file_id),
+                    )
 
                     self.db_conn.commit()
 
@@ -1663,75 +1738,71 @@ class ConnHandler():
                     return
 
             else:
-                self.__send(json.dumps({
-                        "code": -1,
-                        "msg": "operation not found"
-                    }))
+                self.__send(json.dumps({"code": -1, "msg": "operation not found"}))
                 self.log.logger.debug("请求的操作不存在。")
                 return
-            
-            self.db_conn.commit() # 统一 commit
-            handle_cursor.close()
 
+            self.db_conn.commit()  # 统一 commit
+            handle_cursor.close()
 
     @userOperationAuthWrapper
     def handle_createUser(self, loaded_recv, user: Users):
         if "data" not in loaded_recv:
-            self.__send(json.dumps(
-                self.RES_MISSING_ARGUMENT
-            ))
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
+
         new_usr_username = loaded_recv["data"].get("username", None)
         new_usr_pwd = loaded_recv["data"].get("password", None)
 
         if not new_usr_username or not new_usr_pwd:
             self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
+
         if not user.hasRights(("create_user",)):
             self.__send(json.dumps(self.RES_ACCESS_DENIED))
             return
-        
+
         # 判断用户是否存在
         new_user = Users(new_usr_username, self.db_conn)
         if new_user.ifExists():
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "user exists"
-            }))
+            self.__send(json.dumps({"code": -1, "msg": "user exists"}))
             return
-        
+
         new_usr_rights = loaded_recv["data"].get("rights", None)
         new_usr_groups = loaded_recv["data"].get("groups", None)
 
         auth_policy = Policies("user_auth", self.db_conn)
 
-        if new_usr_groups!=None or new_usr_rights!=None:
+        if new_usr_groups != None or new_usr_rights != None:
             if not user.hasRights(("custom_new_user_settings",)):
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
-        
-        if new_usr_groups == None: # fallback
+
+        if new_usr_groups == None:  # fallback
             new_usr_groups = auth_policy["default_new_user_groups"]
         if new_usr_rights == None:
             new_usr_rights = auth_policy["default_new_user_rights"]
 
-        
         handle_cursor = self.db_conn.cursor()
-        
+
         # 随机生成8位salt
         alphabet = string.ascii_letters + string.digits
-        salt = ''.join(secrets.choice(alphabet) for i in range(8)) # 安全化
+        salt = "".join(secrets.choice(alphabet) for i in range(8))  # 安全化
 
         __first = hashlib.sha256(new_usr_pwd.encode()).hexdigest()
         __second_obj = hashlib.sha256()
-        __second_obj.update((__first+salt).encode())
+        __second_obj.update((__first + salt).encode())
 
         salted_pwd = __second_obj.hexdigest()
 
-        insert_user = (new_usr_username, salted_pwd, salt, 
-                       json.dumps(new_usr_rights), json.dumps(new_usr_groups), json.dumps(auth_policy["default_new_user_properties"]))
+        insert_user = (
+            new_usr_username,
+            salted_pwd,
+            salt,
+            json.dumps(new_usr_rights),
+            json.dumps(new_usr_groups),
+            json.dumps(auth_policy["default_new_user_properties"]),
+        )
 
         handle_cursor.execute("INSERT INTO users VALUES(?, ?, ?, ?, ?, ?)", insert_user)
 
@@ -1740,15 +1811,13 @@ class ConnHandler():
         self.__send(json.dumps(self.RES_OK))
 
         return
-    
+
     @userOperationAuthWrapper
     def handle_createGroup(self, loaded_recv, user: Users):
         if "data" not in loaded_recv:
-            self.__send(json.dumps(
-                self.RES_MISSING_ARGUMENT
-            ))
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
+
         new_group_name = loaded_recv["data"].get("group_name", None)
         new_group_members = loaded_recv["data"].get("group_members", None)
         new_group_enabled = loaded_recv["data"].get("enabled", None)
@@ -1756,40 +1825,38 @@ class ConnHandler():
         if not new_group_name:
             self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
+
         if not user.hasRights(("create_group",)):
             self.__send(json.dumps(self.RES_ACCESS_DENIED))
             return
-        
+
         handle_cursor = self.db_conn.cursor()
-        
+
         # 判断组是否存在
-        handle_cursor.execute("SELECT count(name) from groups where name = ?", (new_group_name,))
+        handle_cursor.execute(
+            "SELECT count(name) from groups where name = ?", (new_group_name,)
+        )
         result = handle_cursor.fetchone()
 
-        if result[0] != 0: # 不做过多判断（虽然本该如此）
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "group exists"
-            }))
+        if result[0] != 0:  # 不做过多判断（虽然本该如此）
+            self.__send(json.dumps({"code": -1, "msg": "group exists"}))
             return
 
-        
         new_group_rights = loaded_recv["data"].get("rights", None)
 
         group_policy = Policies("group_settings", self.db_conn)
 
-        if new_group_rights != None or new_group_enabled != None: # 不为未提供的，因提供空列表也是一种提交
+        if new_group_rights != None or new_group_enabled != None:  # 不为未提供的，因提供空列表也是一种提交
             if not user.hasRights(("custom_new_group_settings",)):
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
-            
+
         if new_group_members != None:
             if not user.hasRights(("custom_new_group_members",)):
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
-        
-        if new_group_rights == None: # fallback
+
+        if new_group_rights == None:  # fallback
             new_group_rights = group_policy["default_rights"]
 
         if new_group_members == None:
@@ -1798,13 +1865,9 @@ class ConnHandler():
         if new_group_enabled == None:
             new_group_enabled = group_policy["default_enabled"]
         elif new_group_enabled != 0 and new_group_enabled != 1:
-            self.__send(json.dumps({
-                "code": 400,
-                "msg": "group_enabled is invaild"
-            }))
+            self.__send(json.dumps({"code": 400, "msg": "group_enabled is invaild"}))
             return
-        
-        
+
         # 开始处理
 
         handle_cursor = self.db_conn.cursor()
@@ -1814,8 +1877,16 @@ class ConnHandler():
         # generate group id (why do I need this?)
         group_id = secrets.token_hex(16)
 
-        handle_cursor.execute("INSERT INTO groups VALUES(?, ?, ?, ?, ?)",  # 插入新的组
-                              (group_id, new_group_name, new_group_enabled, json.dumps(new_group_rights), json.dumps({})))
+        handle_cursor.execute(
+            "INSERT INTO groups VALUES(?, ?, ?, ?, ?)",  # 插入新的组
+            (
+                group_id,
+                new_group_name,
+                new_group_enabled,
+                json.dumps(new_group_rights),
+                json.dumps({}),
+            ),
+        )
 
         for i in new_group_members:
             handle_cursor.execute("SELECT groups FROM users WHERE username = ?", (i,))
@@ -1825,121 +1896,105 @@ class ConnHandler():
                 continue
             old_groups = json.loads(query_result[0])
 
-            new_groups = old_groups # copy
-            new_groups[new_group_name] = {
-                "expire": 0
-            }
+            new_groups = old_groups  # copy
+            new_groups[new_group_name] = {"expire": 0}
 
-            handle_cursor.execute("UPDATE users SET groups = ? WHERE username = ? ", (json.dumps(new_groups), i))
-
-
+            handle_cursor.execute(
+                "UPDATE users SET groups = ? WHERE username = ? ",
+                (json.dumps(new_groups), i),
+            )
 
         self.db_conn.commit()
 
         self.__send(json.dumps(self.RES_OK))
 
         return
-    
+
     @userOperationAuthWrapper
     def handle_shutdown(self, loaded_recv, user: Users):
-        
         if not user.hasRights(("shutdown",)):
             self.__send(json.dumps(self.RES_ACCESS_DENIED))
             return
-        
+
         self.terminate_event.set()
 
-        self.__send(json.dumps({
-            "code": 200,
-            "msg": "goodbye"
-        }))
+        self.__send(json.dumps({"code": 200, "msg": "goodbye"}))
 
         # 先终止一次连接（可以重复终止）
         self.conn.close()
 
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        host, port= 'localhost', self.config["connect"]["port"]
-        client_socket.connect((host,port))
+        host, port = "localhost", self.config["connect"]["port"]
+        client_socket.connect((host, port))
         client_socket.close()
 
         return
 
-    @userOperationAuthWrapper         
+    @userOperationAuthWrapper
     def handle_getUserProperties(self, loaded_recv, user: Users):
         if "data" not in loaded_recv:
-            self.__send(json.dumps(
-                self.RES_MISSING_ARGUMENT
-            ))
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
+
         target_username = loaded_recv["data"].get("username", user.username)
 
         if not target_username:
-            target_username = user.username # fallback to whoami
+            target_username = user.username  # fallback to whoami
 
         if target_username != user.username:
             if not user.hasRights(("view_others_properties",)):
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
-            
+
             query_user_object = Users(target_username, self.db_conn)
             if not query_user_object.ifExists():
                 self.__send(json.dumps(self.RES_NOT_FOUND))
                 return
-        
+
         else:
             query_user_object = user
 
         response = {
             "rights": list(query_user_object.rights),
             "groups": list(query_user_object.groups),
-            "properties": query_user_object.properties
+            "properties": query_user_object.properties,
         }
 
         self.__send(json.dumps(response))
         return
-        
+
     @userOperationAuthWrapper
     def handle_operateDir(self, loaded_recv, user: Users):
-        
         if "data" not in loaded_recv:
-            self.__send(json.dumps(
-                self.RES_MISSING_ARGUMENT
-            ))
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
-        if not (action:=loaded_recv["data"].get("action", None)):
-            self.__send(json.dumps(
-                self.RES_MISSING_ARGUMENT
-            ))
+
+        if not (action := loaded_recv["data"].get("action", None)):
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
-        if not (dir_id:=loaded_recv["data"].get("dir_id", None)):
-            self.__send(json.dumps(
-                {
-                    "code" : -1,
-                    "msg": "need a dir id"
-                }
-            ))
+
+        if not (dir_id := loaded_recv["data"].get("dir_id", None)):
+            self.__send(json.dumps({"code": -1, "msg": "need a dir id"}))
             return
-        
+
         view_deleted = loaded_recv["data"].get("view_deleted", False)
-        
+
         if loaded_recv["data"]["action"] == "recover":
-            view_deleted = True # 若要恢复文件，则必须有权访问被删除的文件
-        
-        if view_deleted: # 如果启用 view_deleted 选项
+            view_deleted = True  # 若要恢复文件，则必须有权访问被删除的文件
+
+        if view_deleted:  # 如果启用 view_deleted 选项
             if not user.hasRights(("view_deleted",)):
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
 
-        
         handle_cursor = self.db_conn.cursor()
 
-        handle_cursor.execute('SELECT name, parent_id, access_rules, external_access, properties, state \
-                              FROM path_structures WHERE id = ? AND type = "dir";', \
-                              (dir_id,))
-        
+        handle_cursor.execute(
+            'SELECT name, parent_id, access_rules, external_access, properties, state \
+                              FROM path_structures WHERE id = ? AND type = "dir";',
+            (dir_id,),
+        )
+
         result = handle_cursor.fetchall()
 
         # print(result)
@@ -1947,32 +2002,30 @@ class ConnHandler():
         if len(result) > 1:
             raise ValueError("Invaild query result length")
         elif len(result) < 1:
-            self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "no such dir"
-                }))
+            self.__send(json.dumps({"code": -1, "msg": "no such dir"}))
             return
         else:
-            if (dir_state:=json.loads(result[0][5]))["code"] == "deleted": 
+            if (dir_state := json.loads(result[0][5]))["code"] == "deleted":
                 # 如下，file_state 不一定是 file 的 state，但由于安全性原因只能先写这个判断
                 if not view_deleted:
-                    self.__send(
-                        json.dumps(self.RES_NOT_FOUND)
-                    )
+                    self.__send(json.dumps(self.RES_NOT_FOUND))
                     return
 
-        
-        if action in ["list", "delete", "permanently_delete", "rename", "recover", "move", "change_id"]:
-
+        if action in [
+            "list",
+            "delete",
+            "permanently_delete",
+            "rename",
+            "recover",
+            "move",
+            "change_id",
+        ]:
             # 鉴权
-            if not self.verifyUserAccess(dir_id, action, user, _subcall = False):
-                self.__send(json.dumps({
-                    "code": 403,
-                    "msg": "permission denied"
-                }))
+            if not self.verifyUserAccess(dir_id, action, user, _subcall=False):
+                self.__send(json.dumps({"code": 403, "msg": "permission denied"}))
                 self.log.logger.debug("权限校验失败：无权执行所请求的操作")
                 return
-            
+
             if action == "list":
                 self.handle_getDir(loaded_recv)
 
@@ -1981,26 +2034,29 @@ class ConnHandler():
                 delete_after_marked_time = recycle_policy["deleteAfterMarked"]
 
                 if dir_state["code"] == "deleted":
-                    self.__send(json.dumps({
-                        "code": -1, 
-                        "msg": "The directory has been marked for deletion"
-                    }))
+                    self.__send(
+                        json.dumps(
+                            {
+                                "code": -1,
+                                "msg": "The directory has been marked for deletion",
+                            }
+                        )
+                    )
                     return
 
-                succeeded, failed = self.deleteDir(dir_id, user, delete_after=delete_after_marked_time)
+                succeeded, failed = self.deleteDir(
+                    dir_id, user, delete_after=delete_after_marked_time
+                )
 
                 if failed:
-                    response_code = -3 # 请求已经完成，但有错误
+                    response_code = -3  # 请求已经完成，但有错误
                 else:
                     response_code = 0
 
                 response = {
                     "code": response_code,
                     "msg": "request processed",
-                    "data": {
-                        "succeeded": succeeded,
-                        "failed": failed
-                    }
+                    "data": {"succeeded": succeeded, "failed": failed},
                 }
 
                 self.__send(json.dumps(response))
@@ -2009,120 +2065,113 @@ class ConnHandler():
                 pass
 
             elif action == "rename":
-
                 new_dirname = loaded_recv["data"].get("new_dirname", None)
-                    
-                if not new_dirname: # dirname 不能为空
+
+                if not new_dirname:  # dirname 不能为空
                     self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
                     return
 
-                
-                if dir_state_code:=dir_state["code"] != "ok":
+                if dir_state_code := dir_state["code"] != "ok":
                     if dir_state_code == "locked":
-                        self.__send(json.dumps({
-                            "code": -1,
-                            "msg": "directory is locked",
-                            "data": {
-                                "expire_time": dir_state.get("expire_time", 0)
-                            }
-                        }))
+                        self.__send(
+                            json.dumps(
+                                {
+                                    "code": -1,
+                                    "msg": "directory is locked",
+                                    "data": {
+                                        "expire_time": dir_state.get("expire_time", 0)
+                                    },
+                                }
+                            )
+                        )
                         return
 
-                handle_cursor.execute("UPDATE path_structures SET name = ? WHERE id = ?;", (new_dirname, dir_id))
+                handle_cursor.execute(
+                    "UPDATE path_structures SET name = ? WHERE id = ?;",
+                    (new_dirname, dir_id),
+                )
 
                 self.db_conn.commit()
 
-                self.__send(json.dumps({
-                    "code": 0,
-                    "msg": "success"
-                }))
+                self.__send(json.dumps({"code": 0, "msg": "success"}))
 
-
-            elif action == "recover": # 会恢复其下的所有内容，无论其是否因删除此文件夹而被删除
-                
+            elif action == "recover":  # 会恢复其下的所有内容，无论其是否因删除此文件夹而被删除
                 if dir_state["code"] != "deleted":
-                    self.__send(json.dumps({
-                        "code": -1, 
-                        "msg": "Directory is not deleted"
-                    }))
+                    self.__send(
+                        json.dumps({"code": -1, "msg": "Directory is not deleted"})
+                    )
                     return
 
                 succeeded, failed = self.recoverDir(dir_id, user)
 
                 if failed:
-                    response_code = -3 # 请求已经完成，但有错误
+                    response_code = -3  # 请求已经完成，但有错误
                 else:
                     response_code = 0
 
                 response = {
                     "code": response_code,
                     "msg": "request processed",
-                    "data": {
-                        "succeeded": succeeded,
-                        "failed": failed
-                    }
+                    "data": {"succeeded": succeeded, "failed": failed},
                 }
 
                 self.__send(json.dumps(response))
 
-            elif action == "move": # 基本同 operateFile 的判断
-
+            elif action == "move":  # 基本同 operateFile 的判断
                 new_parent_id = loaded_recv["data"].get("new_parent", None)
 
-                if new_parent_id == None: # 因为根目录的id为空
+                if new_parent_id == None:  # 因为根目录的id为空
                     self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
                     return
-                
+
                 if new_parent_id == dir_id:
-                    self.__send(json.dumps({
-                        "code": -2,
-                        "msg": "一个目录的父级目录不能指向它自己"
-                    }))
+                    self.__send(json.dumps({"code": -2, "msg": "一个目录的父级目录不能指向它自己"}))
                     return
-                
+
                 # 判断新目录是否存在
 
                 handle_cursor = self.db_conn.cursor()
 
-                handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (new_parent_id, ))
+                handle_cursor.execute(
+                    "SELECT type FROM path_structures WHERE id = ?", (new_parent_id,)
+                )
 
                 query_result = handle_cursor.fetchall()
 
                 if len(query_result) == 0:
-                    self.__send(json.dumps({
-                        "code": 404,
-                        "msg": "没有找到请求的新目录"
-                    }))
+                    self.__send(json.dumps({"code": 404, "msg": "没有找到请求的新目录"}))
                     return
                 elif len(query_result) != 1:
                     raise ValueError("意料之外的记录数量")
-                
+
                 if query_result[0][0] != "dir":
-                    self.__send(json.dumps({
-                        "code": -1,
-                        "msg": "新的路径不是一个目录"
-                    }))
+                    self.__send(json.dumps({"code": -1, "msg": "新的路径不是一个目录"}))
                     return
-                
+
                 # 调取原目录
 
-                handle_cursor.execute("SELECT parent_id FROM path_structures WHERE id = ?", (dir_id, ))
+                handle_cursor.execute(
+                    "SELECT parent_id FROM path_structures WHERE id = ?", (dir_id,)
+                )
 
                 old_parent_result = handle_cursor.fetchone()
 
                 old_parent_id = old_parent_result[0]
 
-                
-                if not self.verifyUserAccess(new_parent_id, "write", user)\
-                    or not self.verifyUserAccess(old_parent_id, "delete", user): 
+                if not self.verifyUserAccess(
+                    new_parent_id, "write", user
+                ) or not self.verifyUserAccess(old_parent_id, "delete", user):
                     # 移动操作实际上是向新目录写入文件，并删除旧目录文件
-                    
+
                     self.__send(json.dumps(self.RES_ACCESS_DENIED))
                     return
-                
+
                 # 执行操作
 
-                handle_cursor.execute("UPDATE path_structures SET parent_id = ? WHERE id = ?;", (new_parent_id, dir_id)) 
+                handle_cursor.execute(
+                    "UPDATE path_structures SET parent_id = ? WHERE id = ?;",
+                    (new_parent_id, dir_id),
+                )
                 # 不需要对下级文件做其他操作
 
                 self.db_conn.commit()
@@ -2130,44 +2179,41 @@ class ConnHandler():
                 self.__send(json.dumps(self.RES_OK))
 
                 return
-            
-            elif action == "change_id":
 
+            elif action == "change_id":
                 if not user.hasRights(("change_id",)):
                     self.__send(json.dumps(self.RES_ACCESS_DENIED))
                     return
-                
+
                 new_id = loaded_recv["data"].get("new_id", None)
 
                 if not new_id:
                     self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
                     return
-                
-                if new_id == dir_id: # 如果和原ID一致，用于减少数据库开销
-                    self.__send(json.dumps({
-                        "code": 0,
-                        "msg": "no changes made"
-                    }))
+
+                if new_id == dir_id:  # 如果和原ID一致，用于减少数据库开销
+                    self.__send(json.dumps({"code": 0, "msg": "no changes made"}))
                     return
 
                 # 判断新 ID 是否被使用
 
                 handle_cursor = self.db_conn.cursor()
 
-                handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (new_id, ))
+                handle_cursor.execute(
+                    "SELECT type FROM path_structures WHERE id = ?", (new_id,)
+                )
 
                 result = handle_cursor.fetchall()
 
                 if result:
-                    self.__send(json.dumps({
-                        "code": -1,
-                        "msg": "id exists"
-                    }))
+                    self.__send(json.dumps({"code": -1, "msg": "id exists"}))
                     return
-                
+
                 # 执行操作
 
-                handle_cursor.execute("UPDATE path_structures SET id = ? WHERE id = ?;", (new_id, dir_id))
+                handle_cursor.execute(
+                    "UPDATE path_structures SET id = ? WHERE id = ?;", (new_id, dir_id)
+                )
 
                 self.db_conn.commit()
 
@@ -2177,131 +2223,271 @@ class ConnHandler():
 
         else:
             self.__send(json.dumps(self.RES_BAD_REQUEST))
-                
-    def handle_createDir(self, loaded_recv, user: Users):
-        
-        if "data" not in loaded_recv:
-            self.__send(json.dumps(
-                self.RES_MISSING_ARGUMENT
-            ))
-            return
-        
-        if not user.hasRights(("create_dir",)): # 鉴权
-            self.__send(json.dumps(self.RES_ACCESS_DENIED))
-            return 
 
-        target_parent_id = loaded_recv["data"].get("parent_id", "") # fallback to rootdir
+    @userOperationAuthWrapper
+    def handle_createDir(self, loaded_recv, user: Users):
+        if "data" not in loaded_recv:
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+            return
+
+        if not user.hasRights(("create_dir",)):  # 鉴权
+            self.__send(json.dumps(self.RES_ACCESS_DENIED))
+            return
+
+        target_parent_id = loaded_recv["data"].get(
+            "parent_id", ""
+        )  # fallback to rootdir
         target_id = loaded_recv["data"].get("dir_id", None)
         new_dirname = loaded_recv["data"].get("name", None)
 
         if not new_dirname:
-            self.__send(json.dumps(
-                self.RES_MISSING_ARGUMENT
-            ))
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
-        if not target_id: # 自动生成
+
+        if not target_id:  # 自动生成
             target_id = secrets.token_hex(16)
-        
+
         handle_cursor = self.db_conn.cursor()
 
-        handle_cursor.execute("SELECT * FROM path_structures WHERE id = ?", (target_id,))
+        handle_cursor.execute(
+            "SELECT * FROM path_structures WHERE id = ?", (target_id,)
+        )
 
         query_result = handle_cursor.fetchall()
 
         if query_result:
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "file or directory exists.",
-                "__hint__": "if you want to override a directory, use 'operateDir' instead."
-            }))
+            self.__send(
+                json.dumps(
+                    {
+                        "code": -1,
+                        "msg": "file or directory exists.",
+                        "__hint__": "if you want to override a directory, use 'operateDir' instead.",
+                    }
+                )
+            )
             return
-        
-        del query_result # 清除
 
-        if target_parent_id: # 如果不是根目录
+        del query_result  # 清除
 
-            handle_cursor.execute("SELECT type FROM path_structures WHERE id = ?", (target_parent_id,))
+        if target_parent_id:  # 如果不是根目录
+            handle_cursor.execute(
+                "SELECT type FROM path_structures WHERE id = ?", (target_parent_id,)
+            )
 
             dir_query_result = handle_cursor.fetchall()
 
             if not dir_query_result:
-                self.__send(json.dumps({
-                    "code": 404,
-                    "msg": "target directory not found"
-                }))
+                self.__send(
+                    json.dumps({"code": 404, "msg": "target directory not found"})
+                )
                 return
             elif len(dir_query_result) >= 1:
                 raise RuntimeError("数据库出现了不止一条同id的记录")
-            
-            if (d_id_type:=dir_query_result[0][0]) != "dir":
-                self.log.logger.debug(f"用户试图请求在 id 为 {target_parent_id} 的目录下创建文件，\
-                                    但它事实上不是一个目录（{d_id_type}）")
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "not a directory"
-                }))
+
+            if (d_id_type := dir_query_result[0][0]) != "dir":
+                self.log.logger.debug(
+                    f"用户试图请求在 id 为 {target_parent_id} 的目录下创建文件，\
+                                    但它事实上不是一个目录（{d_id_type}）"
+                )
+                self.__send(json.dumps({"code": -1, "msg": "not a directory"}))
                 return
-            
+
             if not self.verifyUserAccess(target_id, "write", user):
-                self.__send(json.dumps(
-                    self.RES_ACCESS_DENIED
-                ))
+                self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
-            
+
         else:
             por_policy = Policies("permission_on_rootdir", self.db_conn)
 
             por_access_rules = por_policy["rules"]["access_rules"]
             por_external_access = por_policy["rules"]["external_access"]
 
-            if not self._verifyAccess(user, "write", por_access_rules, por_external_access, True):
+            if not self._verifyAccess(
+                user, "write", por_access_rules, por_external_access, True
+            ):
                 self.log.logger.debug("用户无权访问根目录")
                 self.__send(self.RES_ACCESS_DENIED)
                 return
             else:
                 self.log.logger.debug("根目录鉴权成功")
 
-        
         # 开始创建文件夹
-
 
         # 注册数据库条目
 
-        handle_cursor.execute("INSERT INTO path_structures \
+        handle_cursor.execute(
+            "INSERT INTO path_structures \
                               (id , name , owner , parent_id , type , file_id , access_rules, external_access, properties, state) \
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                              (target_id, new_dirname, json.dumps((("user", user.username),)), target_parent_id, 
-                               "dir", None, r"{}", r"{}", json.dumps({
-                                   "created_time": time.time()
-                               }), json.dumps({
-                                   "code": "ok",
-                                   "expire_time": 0
-                               }) ))
-        
+            (
+                target_id,
+                new_dirname,
+                json.dumps((("user", user.username),)),
+                target_parent_id,
+                "dir",
+                None,
+                r"{}",
+                r"{}",
+                json.dumps({"created_time": time.time()}),
+                json.dumps({"code": "ok", "expire_time": 0}),
+            ),
+        )
+
         self.db_conn.commit()
         handle_cursor.close()
 
-
-        self.__send(json.dumps({
-            "code": 0,
-            "msg": "directory created",
-            "data": {
-                "dir_id": target_id
-            }
-        }))
+        self.__send(
+            json.dumps(
+                {"code": 0, "msg": "directory created", "data": {"dir_id": target_id}}
+            )
+        )
 
         return
 
+    # =====================================
 
-        
-        
-            
+    #    -*- operateUser 部分 -*-
 
-if __name__ == "__main__":
-    Thread = ConnThreads(
-            target=ConnHandler, name = "threadName", args=(), kwargs={}
-        )
-    Thread.start()
-    time.sleep(1)
-    print(Thread.is_alive())
+    #  该部分处理用户操作的相关请求。
+    #  注意：这不包括创建用户的操作。
+
+    # =====================================
+
+    @userOperationAuthWrapper
+    def handle_operateUser(self, loaded_recv, user: Users):
+        # 删除用户将必定是永久删除
+
+        handle_cursor = self.db_conn.cursor()
+        
+        if "data" not in loaded_recv:
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+            return
+
+        if not (action := loaded_recv["data"].get("action", None)):
+            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+            return
+
+        username = loaded_recv["data"].get("username", user.username)
+
+        if not username:
+            self.__send(json.dumps({
+                "code": -1,
+                "msg": "need a username"
+            }))
+
+        elif username != user.username and action != "get_publickey":
+            if not user.hasRights(("edit_other_users",)):
+                self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                return
+
+        dest_user = Users(username, self.db_conn)
+
+        if not dest_user.ifExists():
+            self.__send(json.dumps({"code": 404, "msg": "user not found"}))
+            return
+        
+        dest_user.load()
+
+        user_properties = dest_user.properties
+        user_state = user_properties["state"]
+
+        if action in [
+            "set_nickname",
+            "delete",
+            "passwd",
+            "set_rights",
+            "set_groups",
+            "change_id",
+            "set_status",
+            "set_publickey",
+            "get_publickey"
+        ]:
+            # 因为这里的操作不是路径操作，故只能手动鉴权
+
+            if action == "set_nickname":
+                pass
+
+            elif action == "delete":
+                if not user.hasRights(("delete_user",)):
+                    self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                    return
+                
+                if dest_user.username == user.username:
+                    self.__send(json.dumps({"code": -1, "msg": "a user cannot delete itself"}))
+                    return
+                
+                ft_conn = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
+                ft_cursor = ft_conn.cursor()
+                
+                # 删除任务, 留下已完成的任务供查证
+                ft_cursor.execute("DELETE from ft_queue WHERE username = ? AND done = 0;" (dest_user.username, ))
+                ft_conn.commit()
+                ft_conn.close()
+
+                # 删除用户
+                handle_cursor.execute("DELETE from users WHERE username = ?;", (dest_user.username, ))
+                self.db_conn.commit()
+
+                self.__send(json.dump(self.RES_OK))
+                return
+
+
+            elif action == "set_publickey": # incomplete - does not support device_id
+                new_publickey = loaded_recv["data"].get("publickey", None)
+                if not new_publickey:
+                    self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+                    return
+                
+                try:
+                    RSA.import_key(new_publickey)
+                except ValueError or IndexError or TypeError:
+                    self.__send(json.dumps({
+                        "code": -1,
+                        "msg": "not a vaild key"
+                    }))
+                    return
+                
+                handle_cursor.execute("UPDATE users SET publickey = ? WHERE username = ?", (new_publickey, dest_user.username))
+                self.db_conn.commit()
+
+                self.__send(json.dumps(self.RES_OK))
+                return
+                
+            elif action == "get_publickey":
+                
+                if not user.hasRights(("view_others_publickey",)):
+                    self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                    return
+                
+                if dest_user.publickey:
+
+                    self.__send(json.dumps({
+                        "code": 0,
+                        "msg": "ok",
+                        "data": {
+                            "publickey": dest_user.publickey
+                        }
+                    }))
+
+                else:
+
+                    self.__send(json.dumps({
+                        "code": 404,
+                        "msg": "the user does not have a publickey"
+                    }))
+
+                
+
+            elif action == "passwd":  # 会恢复其下的所有内容，无论其是否因删除此文件夹而被删除
+                
+                # 将强制登出
+
+                # self.__send(json.dumps(response))
+
+                pass
+
+        else:
+            self.__send(json.dumps(self.RES_BAD_REQUEST))
+
+    def handle_getUserPublicKey(self, loaded_recv, user:Users):
+        pass

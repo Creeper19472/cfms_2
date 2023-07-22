@@ -7,16 +7,22 @@ import jwt
 import time
 import json
 
+from deepdiff import DeepDiff
+
 class Users(object):
-    def __init__(self, username, db_conn: sqlite3.Connection, **kwargs):
+    def __init__(self, username, db_conn: sqlite3.Connection, autoload=True, **kwargs):
         self.username = username
         self.db_conn = db_conn
         self.db_cursor = db_conn.cursor()
         self.rights = set()
         self.groups = set()
         self.properties = {}
+        self._original_properties = {}
 
-        self.load() # by default, in order to avoid mistakes
+        self.publickey = None # str
+        
+        if autoload:
+            self.load() # by default, in order to avoid mistakes
 
     def __getitem__(self, key):
         return self.properties[key]
@@ -30,17 +36,17 @@ class Users(object):
     def load(self):
         if not self.ifExists():
             return
-        
-        prelist = []
-        prelist.append(self.username)
 
-        self.db_cursor.execute("SELECT rights, groups, properties from users where username = ?", tuple(prelist))
+        self.db_cursor.execute("SELECT rights, groups, properties, publickey from users where username = ?", (self.username,))
         result = self.db_cursor.fetchone()
 
         self.rights = set() # 重置
         self.groups = set()
 
         self.properties = json.loads(result[2])
+        self._original_properties = self.properties # copy
+
+        self.publickey = result[3]
 
         for i in (loaded_result := json.loads(result[0])):
             if (not (expire_time:=loaded_result[i].get("expire", 0))) or (expire_time > time.time()):
@@ -59,10 +65,8 @@ class Users(object):
         self.groups.add("user") # deafult and forced group
 
         for per_group in self.groups:
-            # print(per_group)
-            prelist = []
-            prelist.append(per_group)
-            self.db_cursor.execute("SELECT rights, enabled from groups where name = ?", tuple(prelist))
+
+            self.db_cursor.execute("SELECT rights, enabled from groups where name = ?", (per_group, ))
             per_result = self.db_cursor.fetchone()
             if per_result[1]:
                 for i in (per_group_rights := json.loads(per_result[0])):
@@ -71,6 +75,41 @@ class Users(object):
                             self.rights.add(i)
                         else:
                             self.rights - {i,} # remove
+
+
+    def save_properties(self, diff_mode=True, allow_new_keys=False) -> None: # 危险，不要随便调用
+        # diff 更新模式，仅对第一层作比较
+        if diff_mode:
+            # Properties
+            diff_properties = {}
+            for i in self.properties:
+                if not i in self._original_properties and not allow_new_keys:
+                    raise KeyError("不允许插入新的键")
+                else:
+                    diff_properties[i] = self.properties[i]
+
+                if self.properties[i] != self._original_properties[i]:
+                    diff_properties[i] = self.properties[i]
+
+            
+        else:
+            diff_properties = self.properties
+
+        self.db_cursor.execute("SELECT properties FROM users WHERE username = ?;", \
+                            (self.username,))
+        query_properties =self.db_cursor.fetchone()[0]
+
+        insert_properties = query_properties
+
+        for i in diff_properties:
+            if not i in query_properties or diff_properties[i] != query_properties[i]:
+                query_properties[i] = diff_properties[i]
+
+        self.db_cursor.execute("UPDATE users SET properties = ? WHERE username = ?", (json.dumps(diff_properties), self.username))
+        self.db_conn.commit()
+         
+
+        return
 
     def ifExists(self):
         # 可能注入的位点

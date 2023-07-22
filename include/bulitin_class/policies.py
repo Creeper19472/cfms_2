@@ -36,6 +36,6 @@ class Policies(object):
         return item in self.content
     
     def save(self) -> None:
-        self.cursor.execute("UPDATE policies SET content = ?, access_rules = ?, external_access = ? WHERE ID = ?;", \
+        self.cursor.execute("UPDATE policies SET content = ?, access_rules = ?, external_access = ? WHERE id = ?;", \
                             (self.policy_id, self.access_rules, self.external_access))
         return
