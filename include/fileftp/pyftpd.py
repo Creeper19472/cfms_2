@@ -144,36 +144,27 @@ class DummyMD5Authorizer(DummyAuthorizer):
         if not self.has_user(username): 
             # 如果无该用户则初始化，但未断开前不会清除临时用户，故对用户权限的更改在下次连接才能生效
             if operation == "write":
-                self.add_user(username, hash, perm='elrawT')
+                self.add_user(username, hash, perm='elrawT',operation="write")
             elif operation == "read":
-                self.add_user(username, hash)
+                self.add_user(username, hash, operation="read")
             else:
                 raise ValueError("Unsupported operation type")
             
-            self.operation = operation
+            
 
-    def add_user(self, username, password, perm='elr', msg_login="Login successful.", msg_quit="Goodbye."):
+    def add_user(self, username, password, perm='elr', msg_login="Login successful.", msg_quit="Goodbye.", operation="read"):
         if self.has_user(username):
             raise ValueError('user %r already exists' % username)
-
-        self._check_permissions(username, perm)
-        dic = {'pwd': str(password), # actually unused
-            'perm': perm,
-            'operms': {},
-            'msg_login': str(msg_login),
-            'msg_quit': str(msg_quit)
-            }
-        self.user_table[username] = dic
-
-    def get_home_dir(self, username):
+        
+        # print("add_user triggered")
+        
+        ### 初始化用户文件夹
         g_db = sqlite3.connect(f"{ROOT_ABSPATH}/general.db")
         g_cursor = g_db.cursor()
 
         fq_db = sqlite3.connect(f"{ROOT_ABSPATH}/content/fqueue.db")
         fq_cursor = fq_db.cursor()
 
-        if self.fake_abspath:
-            return self.fake_abspath
         # return self.user_table[username]['home']
         fq_cursor.execute("SELECT file_id, fake_id, fake_dir FROM ft_queue WHERE task_id = ? ", (username,))
 
@@ -182,11 +173,11 @@ class DummyMD5Authorizer(DummyAuthorizer):
         if not fake_dir:
             fake_dir = username # secrets.token_hex(64)
 
-        self.fake_abspath = f"{ROOT_ABSPATH}/content/temp/{fake_dir}"
-        self.user_table[username]['home'] = self.fake_abspath
+        fake_abspath = f"{ROOT_ABSPATH}/content/temp/{fake_dir}"
 
-        if not os.path.exists(self.fake_abspath):
-            os.makedirs(self.fake_abspath)
+        if not os.path.exists(fake_abspath):
+            # print("not exists")
+            os.makedirs(fake_abspath)
         
         # copy files
         g_cursor.execute("SELECT abspath FROM document_indexes WHERE id = ?", (file_id,))
@@ -194,18 +185,31 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
         if real_file_path:
 
-            self.real_file_path = real_file_path # 准备 override
-            self.fake_file_id = fake_id
+            if operation == "read":
+                # print("read mode detected")
 
-            if self.operation == "read":
-
-                if not os.path.isfile(f"{self.fake_abspath}/{fake_id}"): # slow
-                    shutil.copyfile(real_file_path, f"{self.fake_abspath}/{fake_id}")
+                if not os.path.isfile(f"{fake_abspath}/{fake_id}"): # slow
+                    # print("copy file triggered")
+                    shutil.copyfile(real_file_path, f"{fake_abspath}/{fake_id}")
 
         else:
             raise sqlite3.DatabaseError("document_indexes 应当记录文件的绝对路径，但它为空")
+        
+        ### 初始化部分结束
 
-        return self.fake_abspath
+        self._check_permissions(username, perm)
+        dic = {'pwd': str(password), # actually unused
+            'perm': perm,
+            'operms': {},
+            'msg_login': str(msg_login),
+            'msg_quit': str(msg_quit),
+            'home': fake_abspath,
+            'operation': operation
+            }
+        self.user_table[username] = dic
+
+    def get_home_dir(self, username):
+        return self.user_table[username]['home']
 
 
 

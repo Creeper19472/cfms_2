@@ -2307,7 +2307,7 @@ class ConnHandler:
 
             if (d_id_type := dir_query_result[0][0]) != "dir":
                 self.log.logger.debug(
-                    f"用户试图请求在 id 为 {target_parent_id} 的目录下创建文件，\
+                    f"用户试图请求在 id 为 {target_parent_id} 的目录下创建子目录，\
                                     但它事实上不是一个目录（{d_id_type}）"
                 )
                 self.__send(json.dumps({"code": -1, "msg": "not a directory"}))
@@ -2416,8 +2416,8 @@ class ConnHandler:
             "set_nickname",
             "delete",  # done
             "passwd",  # done
-            "set_rights",
-            "set_groups",
+            "set_rights", # done
+            "set_groups",  # done
             "set_username", # done - not allowed
             "set_status",
             "set_publickey",  # done
@@ -2441,6 +2441,7 @@ class ConnHandler:
                 ft_cursor = ft_conn.cursor()
                 
                 # 删除任务, 留下已完成的任务供查证
+                # 或许可以改变 done 的值来标记文件 - 任务已取消？
                 ft_cursor.execute("DELETE from ft_queue WHERE username = ? AND done = 0;", (dest_user.username, ))
                 ft_conn.commit()
                 ft_conn.close()
@@ -2541,10 +2542,39 @@ class ConnHandler:
                     self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
                     return
                 
-                if not self.checkStructureValidation():
-                    pass
+                if not StructureValidater.checkGroupStructure(new_groups)[0]:
+                    self.__send(json.dumps({
+                        "code": -1,
+                        "msg": "invaild data structure"
+                    }))
+                    return
                 
-                handle_cursor.execute("UPDATE users SET groups = ? WHERE username = ?", ())
+                handle_cursor.execute("UPDATE users SET groups = ? WHERE username = ?", (json.dumps(new_groups), dest_user.username))
+
+                self.__send(json.dumps(self.RES_OK))
+
+            elif action == "set_rights":
+                
+                if not user.hasRights(("set_userrights",)):
+                    self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                    return
+                
+                new_rights = loaded_recv["data"].get("new_rights", None)
+
+                if new_rights == None:
+                    self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+                    return
+                
+                if not StructureValidater.checkRightStructure(new_rights)[0]:
+                    self.__send(json.dumps({
+                        "code": -1,
+                        "msg": "invaild data structure"
+                    }))
+                    return
+                
+                handle_cursor.execute("UPDATE users SET rights = ? WHERE username = ?", (json.dumps(new_rights), dest_user.username))
+
+                self.__send(json.dumps(self.RES_OK))
 
 
         else:

@@ -165,7 +165,9 @@ def dbInit(db_object: DB_Sqlite3):
         "custom_new_group_members": {},
         "view_others_properties": {},
         "change_id": {},
-        "edit_other_users": {}
+        "edit_other_users": {},
+        "set_usergroups": {},
+        "set_userrights": {}
     }
 
     insert_groups = (
