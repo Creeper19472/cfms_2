@@ -2,8 +2,10 @@ import multiprocessing
 import threading
 import time
 
-from pyftpdlib.handlers import FTPHandler
-from pyftpdlib.servers import ThreadedFTPServer  # <-
+import sys
+sys.path.append("./include/") # relative hack
+
+from modules.pyftpdlib.servers import ThreadedFTPServer  # <-
 
 import os
 import sys, json
@@ -12,10 +14,12 @@ import hashlib
 import secrets, shutil
 import sqlite3
 
-from pyftpdlib.handlers import FTPHandler
-from pyftpdlib.handlers import TLS_FTPHandler
+from modules.pyftpdlib.log import logger
 
-from pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
+from modules.pyftpdlib.handlers import FTPHandler
+from modules.pyftpdlib.handlers import TLS_FTPHandler
+
+from modules.pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 
 import logging
 
@@ -28,8 +32,8 @@ class FTPCustomizedHandler(TLS_FTPHandler):
         """Called when client does not send any command within the time
         specified in <timeout> attribute."""
         msg = "Control connection timed out."
-        self.respond("421 " + msg, logfun=self.logger.info)
-        self.close() # right now, trying to solve cpu 20%
+        self.respond("421 " + msg, logfun=logger.info)
+        # self.close() # right now, trying to solve cpu 20%
 
     def on_disconnect(self):
         """Called when connection is closed."""
@@ -80,7 +84,8 @@ class FTPCustomizedHandler(TLS_FTPHandler):
         fq_db.close()
 
     def on_login_failed(self, username, password):
-        self.close() # temp fix
+        # self.close() # temp fix
+        pass
 
 
 class DummyMD5Authorizer(DummyAuthorizer):
@@ -204,7 +209,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
 
 
-def main(root_abspath, shutdown_event: threading.Event, port=5104):
+def main(root_abspath, shutdown_event: threading.Event, addr: tuple):
     global ROOT_ABSPATH
     ROOT_ABSPATH = root_abspath
 
@@ -222,7 +227,7 @@ def main(root_abspath, shutdown_event: threading.Event, port=5104):
     handler.tls_data_required = True
 
     handler.authorizer = authorizer
-    server = ThreadedFTPServer(('', port), handler)
+    server = ThreadedFTPServer(addr, handler)
 
     lfhandler = logging.FileHandler(filename=f"{ROOT_ABSPATH}/content/logs/pyftpd.log")
     cshandler = logging.StreamHandler()

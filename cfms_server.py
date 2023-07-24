@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "230722_alpha")
+CORE_VERSION = (1, 0, 0, "230724_alpha")
 READABLE_VERSION = f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
 
 
@@ -584,7 +584,7 @@ if __name__ == "__main__":
     # 初始化 FTPServer
     log.logger.info(f'正在初始化 FTP 服务... 端口开放在 {config["connect"]["ftp_port"]}.')
     FTPServerThread = threading.Thread(target=pyftpd.main, \
-                                        args=(root_abspath, terminate_event, config["connect"]["ftp_port"]),\
+                                        args=(root_abspath, terminate_event, (config["connect"]["ipv4_addr"], config["connect"]["ftp_port"])),\
                                         name="FTPServerThread")
     FTPServerThread.start()
 

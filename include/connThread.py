@@ -25,6 +25,7 @@ import sqlite3
 from include.bulitin_class.users import Users
 from include.bulitin_class._documents import Documents  # 已弃用
 from include.bulitin_class.policies import Policies
+from include.util.structurecheck import StructureValidater
 
 from typing import Self
 
@@ -169,8 +170,26 @@ class ConnHandler:
         receive = self.__recv()
         if receive == "hello":
             self.__send("hello")
+        elif "HTTP/1." in receive:
+            self.log.logger.debug("客户端试图以HTTP协议进行通信。这并非所支持的。")
+
+            with open(f"{self.root_abspath}/content/418.html") as f:
+                html_content = f.read()
+
+            response = f"""HTTP/1.1 418 I'm a teapot
+            Server: CFMS Server
+            Accept-Ranges: bytes
+            Vary: Accept-Encoding
+            Content-Type: text/plain
+
+            {html_content}
+
+            """
+            self.__send(response)
+            return False
+
         else:
-            print(receive)
+            self.log.logger.debug(f"客户端发送了意料之外的请求：\n{receive}")
             self.__send("Unknown request")
             return False
 
@@ -1187,7 +1206,7 @@ class ConnHandler:
                 return
 
         if avatar_file_id := get_avatar_user["avatar"].get("file_id", None):
-            task_id, task_token, t_filename = self.createFileTask(avatar_file_id)
+            task_id, task_token, t_filename = self.createFileTask(avatar_file_id, user.username)
             self.__send(
                 json.dumps(
                     {
@@ -1204,7 +1223,7 @@ class ConnHandler:
         else:
             if default_avatar_id := avatar_policy["default_avatar"]:
                 task_id, task_token, t_filename, expire_time = self.createFileTask(
-                    default_avatar_id
+                    default_avatar_id, user.username
                 )
 
                 self.log.logger.debug(
@@ -1358,7 +1377,7 @@ class ConnHandler:
 
         # 创建任务
         task_id, task_token, t_filename, expire_time = self.createFileTask(
-            index_file_id, operation="write"
+            index_file_id, operation="write", username=user.username
         )
 
         self.__send(
@@ -1463,7 +1482,7 @@ class ConnHandler:
                         fake_file_id,
                         expire_time,
                     ) = self.createFileTask(
-                        query_file_id, operation="read", expire_time=time.time() + 3600
+                        query_file_id, operation="read", expire_time=time.time() + 3600, username=user.username
                     )
 
                     response = {
@@ -1535,6 +1554,7 @@ class ConnHandler:
                             operation="write",
                             expire_time=time.time() + 3600,
                             force_write=do_force_write,
+                            username=user.username
                         )
                     except PendingWriteFileError:
                         self.__send(
@@ -1802,9 +1822,10 @@ class ConnHandler:
             json.dumps(new_usr_rights),
             json.dumps(new_usr_groups),
             json.dumps(auth_policy["default_new_user_properties"]),
+            None # publickey
         )
 
-        handle_cursor.execute("INSERT INTO users VALUES(?, ?, ?, ?, ?, ?)", insert_user)
+        handle_cursor.execute("INSERT INTO users VALUES(?, ?, ?, ?, ?, ?, ?)", insert_user)
 
         self.db_conn.commit()
 
@@ -2393,14 +2414,14 @@ class ConnHandler:
 
         if action in [
             "set_nickname",
-            "delete",
-            "passwd",
+            "delete",  # done
+            "passwd",  # done
             "set_rights",
             "set_groups",
-            "change_id",
+            "set_username", # done - not allowed
             "set_status",
-            "set_publickey",
-            "get_publickey"
+            "set_publickey",  # done
+            "get_publickey"  # done - TODO #13 单设备一公钥
         ]:
             # 因为这里的操作不是路径操作，故只能手动鉴权
 
@@ -2420,7 +2441,7 @@ class ConnHandler:
                 ft_cursor = ft_conn.cursor()
                 
                 # 删除任务, 留下已完成的任务供查证
-                ft_cursor.execute("DELETE from ft_queue WHERE username = ? AND done = 0;" (dest_user.username, ))
+                ft_cursor.execute("DELETE from ft_queue WHERE username = ? AND done = 0;", (dest_user.username, ))
                 ft_conn.commit()
                 ft_conn.close()
 
@@ -2440,7 +2461,7 @@ class ConnHandler:
                 
                 try:
                     RSA.import_key(new_publickey)
-                except ValueError or IndexError or TypeError:
+                except (ValueError, IndexError, TypeError):
                     self.__send(json.dumps({
                         "code": -1,
                         "msg": "not a vaild key"
@@ -2454,10 +2475,12 @@ class ConnHandler:
                 return
                 
             elif action == "get_publickey":
+
+                if user.username != dest_user.username:
                 
-                if not user.hasRights(("view_others_publickey",)):
-                    self.__send(json.dumps(self.RES_ACCESS_DENIED))
-                    return
+                    if not user.hasRights(("view_others_publickey",)):
+                        self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                        return
                 
                 if dest_user.publickey:
 
@@ -2478,13 +2501,51 @@ class ConnHandler:
 
                 
 
-            elif action == "passwd":  # 会恢复其下的所有内容，无论其是否因删除此文件夹而被删除
+            elif action == "passwd":
+                new_pwd = loaded_recv["data"].get("new_pwd", None)
+                if not new_pwd:
+                    self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+                    return
+
+                # 随机生成8位salt
+                alphabet = string.ascii_letters + string.digits
+                salt = "".join(secrets.choice(alphabet) for i in range(8))  # 安全化
+
+                __first = hashlib.sha256(new_pwd.encode()).hexdigest()
+                __second_obj = hashlib.sha256()
+                __second_obj.update((__first + salt).encode())
+
+                salted_pwd = __second_obj.hexdigest()
+
+                handle_cursor.execute("UPDATE users SET hash = ?, salt = ? WHERE username = ?", (salted_pwd, salt, dest_user.username))
+
+                self.db_conn.commit()
+
+                self.__send(json.dumps(self.RES_OK))
+
+            elif action == "set_username":
+                self.__send(json.dumps({
+                    "code": -1,
+                    "msg": "not allowed"
+                }))
+                return
+            
+            elif action == "set_groups":
+                if not user.hasRights(("set_usergroups",)):
+                    self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                    return
                 
-                # 将强制登出
+                new_groups = loaded_recv["data"].get("new_groups", None)
 
-                # self.__send(json.dumps(response))
+                if new_groups == None:
+                    self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
+                    return
+                
+                if not self.checkStructureValidation():
+                    pass
+                
+                handle_cursor.execute("UPDATE users SET groups = ? WHERE username = ?", ())
 
-                pass
 
         else:
             self.__send(json.dumps(self.RES_BAD_REQUEST))
