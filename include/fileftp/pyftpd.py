@@ -1,4 +1,5 @@
 import multiprocessing
+import platform
 import threading
 import time
 
@@ -22,6 +23,18 @@ from modules.pyftpdlib.handlers import TLS_FTPHandler
 from modules.pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 
 import logging
+
+if os.name == "nt":
+    import ctypes
+
+    def isSystemAdmin():
+
+        try:
+            return ctypes.windll.shell32.IsUserAnAdmin()
+        except:
+            return False
+
+
 
 class FTPCustomizedHandler(TLS_FTPHandler):
     def __init__(self, conn, server, ioloop=None):
@@ -138,7 +151,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
         if if_done != 0: # 可能存在的情况：0 - 未完成，1 - 已完成，-1 - 出现错误，-2 - 任务被取消 
             raise AuthenticationFailed # if a task is done, this account will not be able to access again
         
-        if expire_time and (expire_time < time.time()):
+        if expire_time and (expire_time < time.time()): # 任务过期？
             raise AuthenticationFailed
 
         if not self.has_user(username): 
@@ -166,9 +179,14 @@ class DummyMD5Authorizer(DummyAuthorizer):
         fq_cursor = fq_db.cursor()
 
         # return self.user_table[username]['home']
-        fq_cursor.execute("SELECT file_id, fake_id, fake_dir FROM ft_queue WHERE task_id = ? ", (username,))
 
-        file_id, fake_id, fake_dir = fq_cursor.fetchone()
+        # 获取仍未完成的任务(未检查是否逾期，因这一步骤在登录时完成)，减少IO开销
+        fq_cursor.execute("SELECT file_id, fake_id, fake_dir FROM ft_queue WHERE task_id = ? AND done = 0;", (username,))
+
+        query_results = fq_cursor.fetchall()
+
+        # 取第一条结果的内容作为一致性值的结果，忽略之后的不同情况
+        fake_dir = query_results[0][2]
 
         if not fake_dir:
             fake_dir = username # secrets.token_hex(64)
@@ -178,22 +196,45 @@ class DummyMD5Authorizer(DummyAuthorizer):
         if not os.path.exists(fake_abspath):
             # print("not exists")
             os.makedirs(fake_abspath)
-        
-        # copy files
-        g_cursor.execute("SELECT abspath FROM document_indexes WHERE id = ?", (file_id,))
-        real_file_path = g_cursor.fetchone()[0]
 
-        if real_file_path:
+        # 遍历文件列表，执行复制（链接）操作
+        for i in query_results:
+            file_id, fake_id = i[0,1]
 
-            if operation == "read":
-                # print("read mode detected")
+            # 查询
+            g_cursor.execute("SELECT abspath FROM document_indexes WHERE id = ?", (file_id,))
+            real_file_path = g_cursor.fetchone()[0]
 
-                if not os.path.isfile(f"{fake_abspath}/{fake_id}"): # slow
-                    # print("copy file triggered")
-                    shutil.copyfile(real_file_path, f"{fake_abspath}/{fake_id}")
+            if real_file_path:
 
-        else:
-            raise sqlite3.DatabaseError("document_indexes 应当记录文件的绝对路径，但它为空")
+                if operation == "read":
+                    # print("read mode detected")
+                    real_file_abspath = os.path.abspath(real_file_path)
+                    # print(real_file_abspath)
+
+                    if not os.path.isfile(f"{fake_abspath}/{fake_id}"): # slow
+
+                        if os.name == "nt" and tuple(map(int, platform.version().split("."))) >= (10, 0): # 试图优化 IO 开销
+
+                            if isSystemAdmin():
+                                # print("Admin")
+                                os.system(f'mklink /H "{fake_abspath}/{fake_id}" {real_file_abspath}')
+                            else:
+                                # print("Copying file")
+                                shutil.copyfile(real_file_abspath, f"{fake_abspath}/{fake_id}")
+
+                        elif os.name == "posix":
+                            try:
+                                os.system(f"ln {real_file_abspath} {fake_abspath}/{fake_id} -s ")
+                            except OSError:
+                                shutil.copyfile(real_file_abspath, f"{fake_abspath}/{fake_id}")
+
+                        else:
+                            # print("else copyfile")
+                            shutil.copyfile(real_file_abspath, f"{fake_abspath}/{fake_id}")
+
+            else:
+                raise sqlite3.DatabaseError("document_indexes 应当记录文件的绝对路径，但它为空")
         
         ### 初始化部分结束
 
@@ -210,6 +251,14 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
     def get_home_dir(self, username):
         return self.user_table[username]['home']
+    
+    def remove_user(self, username):
+        """Remove a user from the virtual users table."""
+
+        # 清除临时文件夹
+        os.removedirs(self.user_table[username]["home"])
+
+        del self.user_table[username]
 
 
 

@@ -361,22 +361,6 @@ while count < 10:
     # received = object_conn.recv()
     # print("Received: {}".format(received))
 
-    # object_conn.send(json.dumps(
-    #     {
-    #         "version": 1,
-    #         "request": "shutdown",
-    #         "data": {
-    #         },
-    #         "auth": {
-    #             "username": "admin",
-    #             "token":  token
-    #         }
-    #      }
-    # ))
-
-    # received = object_conn.recv()
-    # print("Received: {}".format(received))
-
     object_conn.send(json.dumps(
         {
             "version": 1,
@@ -517,6 +501,22 @@ while count < 10:
                 "action": "change_id",
                 "dir_id": "dir01",
                 "new_id": "dir01"
+            },
+            "auth": {
+                "username": "admin",
+                "token":  token
+            }
+         }
+    ))
+
+    received = object_conn.recv()
+    print("Received: {}".format(received))
+
+    object_conn.send(json.dumps(
+        {
+            "version": 1,
+            "request": "shutdown",
+            "data": {
             },
             "auth": {
                 "username": "admin",

@@ -25,9 +25,11 @@ import sqlite3
 from include.bulitin_class.users import Users
 from include.bulitin_class._documents import Documents  # 已弃用
 from include.bulitin_class.policies import Policies
-from include.util.structurecheck import StructureValidater
 
-from typing import Self
+from include.util.structurecheck import StructureValidater
+from include.util.convert import convertFile2PathID
+
+from typing import Iterable, Self
 
 
 class PendingWriteFileError(Exception):
@@ -369,7 +371,7 @@ class ConnHandler:
 
     def createFileTask(
         self,
-        file_id,
+        file_ids: Iterable,
         username,
         task_id=None,
         operation="read",
@@ -397,39 +399,70 @@ class ConnHandler:
 
         token_to_store = (final_token_hash, token_salt)
 
-        # fake_id, fake_dir(set to task_id)
-        fake_id = secrets.token_hex(16)
+        # fake_dir(set to task_id)
         fake_dir = task_id[32:]
+        
+        # Iterable: allocate fake_id for per file
 
-        if operation == "write":
-            fq_cur.execute(
-                'SELECT * FROM ft_queue WHERE file_id = ? AND operation = "write" AND done = 0;',
-                (file_id,),
-            )
-            query_result = fq_cur.fetchall()
+        insert_list = []
+        return_id_dict = {} # file_id: fake_id
 
-            if query_result and not force_write:
-                raise PendingWriteFileError("文件存在一需要写入的任务，且该任务尚未完成")
+        for per_file_id in file_ids:
+            this_fake_id = secrets.token_hex(16)
 
-        fq_cur.execute(
-            "INSERT INTO ft_queue (task_id, username, operation, token, fake_id, fake_dir, file_id, expire_time, done) \
-                        VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, 0 );",
-            (
+            if operation == "write":
+                fq_cur.execute(
+                    'SELECT * FROM ft_queue WHERE file_id = ? AND operation = "write" AND done = 0 AND expire_time > ?;',
+                    (per_file_id, time.time(),)
+                )
+                query_result = fq_cur.fetchall()
+
+                if query_result and not force_write:
+                    raise PendingWriteFileError("文件存在至少一需要写入的任务，且该任务尚未完成")
+                
+            insert_list.append((
                 task_id,
                 username,
                 operation,
                 json.dumps(token_to_store),
-                fake_id,
+                this_fake_id,
                 fake_dir,
-                file_id,
+                per_file_id,
                 expire_time,
-            ),
+            ))  
+
+            return_id_dict[per_file_id] = this_fake_id   
+            
+
+        fq_cur.executemany(
+            "INSERT INTO ft_queue (task_id, username, operation, token, fake_id, fake_dir, file_id, expire_time, done) \
+                        VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, 0 );",
+            insert_list
         )
 
         fqueue_db.commit()
         fqueue_db.close()
 
-        return task_id, token_hash_sha256, fake_id, expire_time
+        return task_id, token_hash_sha256, return_id_dict, expire_time
+
+    def cancelFileTask(self, task_id):
+        fqueue_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
+        fq_cur = fqueue_db.cursor()
+
+        fq_cur.execute("SELECT FROM ft_queue WHERE task_id = ? AND done = 0 AND expire_time > ?", (task_id, time.time()))
+        query_result = fq_cur.fetchall()
+
+        if not query_result: # 如果任务已经完成，或并未存在
+            return False
+        
+        fq_cur.execute("UPDATE ft_queue SET done = -2 WHERE task_id = ? AND done = 0 AND expire_time > ?;", (task_id, time.time()))
+        fqueue_db.commit()
+        fqueue_db.close()
+
+        return True
+        
+
+
 
     def permanentlyDeleteFile(self, fake_path_id):
         g_cur = self.db_conn.cursor()
@@ -1206,7 +1239,14 @@ class ConnHandler:
                 return
 
         if avatar_file_id := get_avatar_user["avatar"].get("file_id", None):
-            task_id, task_token, t_filename = self.createFileTask(avatar_file_id, user.username)
+            task_id, task_token, t_filenames = self.createFileTask((avatar_file_id,), user.username)
+
+            mapping = {
+                "": avatar_file_id
+            }
+
+            mapped_dict = convertFile2PathID(t_filenames, mapping)
+
             self.__send(
                 json.dumps(
                     {
@@ -1215,16 +1255,22 @@ class ConnHandler:
                         "data": {
                             "task_id": task_id,
                             "task_token": task_token,
-                            "t_filename": t_filename,
+                            "t_filename": mapped_dict,
                         },
                     }
                 )
             )
         else:
             if default_avatar_id := avatar_policy["default_avatar"]:
-                task_id, task_token, t_filename, expire_time = self.createFileTask(
-                    default_avatar_id, user.username
+                task_id, task_token, t_filenames, expire_time = self.createFileTask(
+                    (default_avatar_id,), user.username
                 )
+
+                mapping = {
+                    "": default_avatar_id
+                }
+
+                mapped_dict = convertFile2PathID(t_filenames, mapping)
 
                 self.log.logger.debug(
                     f"用户 {user.username} 请求帐户 {avatar_username} 的头像，返回为默认头像。"
@@ -1238,7 +1284,7 @@ class ConnHandler:
                             "data": {
                                 "task_id": task_id,
                                 "task_token": task_token,
-                                "t_filename": t_filename,
+                                "t_filename": mapped_dict,
                                 "expire_time": expire_time,
                             },
                         }
@@ -1376,9 +1422,13 @@ class ConnHandler:
         handle_cursor.close()
 
         # 创建任务
-        task_id, task_token, t_filename, expire_time = self.createFileTask(
-            index_file_id, operation="write", username=user.username
+        task_id, task_token, t_filenames, expire_time = self.createFileTask(
+            (index_file_id,), operation="write", username=user.username
         )
+
+        mapped_dict = convertFile2PathID(t_filenames, {
+            target_file_path_id: index_file_id
+        })
 
         self.__send(
             json.dumps(
@@ -1388,7 +1438,7 @@ class ConnHandler:
                     "data": {
                         "task_id": task_id,
                         "task_token": task_token,
-                        "t_filename": t_filename,
+                        "t_filename": mapped_dict,
                         "expire_time": expire_time,
                     },
                 }
@@ -1479,11 +1529,15 @@ class ConnHandler:
                     (
                         task_id,
                         task_token,
-                        fake_file_id,
+                        fake_file_ids,
                         expire_time,
                     ) = self.createFileTask(
-                        query_file_id, operation="read", expire_time=time.time() + 3600, username=user.username
+                        (query_file_id,), operation="read", expire_time=time.time() + 3600, username=user.username
                     )
+
+                    mapping = {
+                        file_id: query_file_id
+                    }
 
                     response = {
                         "code": 0,
@@ -1492,7 +1546,7 @@ class ConnHandler:
                             "task_id": task_id,
                             "task_token": task_token,  # original hash after sha256
                             "expire_time": expire_time,
-                            "t_filename": fake_file_id,
+                            "t_filename": convertFile2PathID(fake_file_ids, mapping),
                         },
                     }
 
@@ -1547,10 +1601,10 @@ class ConnHandler:
                         (
                             task_id,
                             task_token,
-                            fake_file_id,
+                            fake_file_ids,
                             expire_time,
                         ) = self.createFileTask(
-                            query_file_id,
+                            (query_file_id,),
                             operation="write",
                             expire_time=time.time() + 3600,
                             force_write=do_force_write,
@@ -1561,6 +1615,8 @@ class ConnHandler:
                             json.dumps({"code": -1, "msg": "file already in use"})
                         )
                         return
+                    
+                    mapping = {file_id: query_file_id}
 
                     response = {
                         "code": 0,
@@ -1569,7 +1625,7 @@ class ConnHandler:
                             "task_id": task_id,
                             "task_token": task_token,  # original hash after sha256
                             "expire_time": expire_time,
-                            "t_filename": fake_file_id,  # 这个ID是客户端上传文件时应当使用的文件名
+                            "t_filename": convertFile2PathID(fake_file_ids, mapping),  # 这个ID是客户端上传文件时应当使用的文件名
                         },
                     }
 

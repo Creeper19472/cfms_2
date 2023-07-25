@@ -14,10 +14,6 @@ ipv6_addr = ""
 
 port = 5103
 
-# 已弃用。
-file_cmd_port = 5104
-file_data_port = 5105
-
 # 服务器应当以哪个端口开放 FTP 服务（文件传输所必需的）？
 ftp_port = 5104
 
