@@ -14,6 +14,12 @@ ipv6_addr = ""
 
 port = 5103
 
+# 同时允许运行的 Handler 线程数与最大排队连接数。
+# 总允许连接数 = max_handlers + max_queued_connections
+max_handlers = 10
+max_queued_connections = 3
+# 这并不通常有效，因服务器将接受任何新的连接后在子线程中挂起它。
+
 # 服务器应当以哪个端口开放 FTP 服务（文件传输所必需的）？
 ftp_port = 5104
 

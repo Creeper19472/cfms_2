@@ -199,7 +199,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
         # 遍历文件列表，执行复制（链接）操作
         for i in query_results:
-            file_id, fake_id = i[0,1]
+            file_id, fake_id = i[0], i[1]
 
             # 查询
             g_cursor.execute("SELECT abspath FROM document_indexes WHERE id = ?", (file_id,))
@@ -256,7 +256,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
         """Remove a user from the virtual users table."""
 
         # 清除临时文件夹
-        os.removedirs(self.user_table[username]["home"])
+        shutil.rmtree(self.user_table[username]["home"])
 
         del self.user_table[username]
 

@@ -37,26 +37,35 @@ class PendingWriteFileError(Exception):
 
 
 class ConnThreads(threading.Thread):
-    def __init__(self, target, name, args=(), kwargs={}):
+    def __init__(self, target, name, semaphore: threading.Semaphore, args=(), kwargs={}):
         super().__init__()
         self.target = target
         self.name = name  # 只能是这个变量名
         # 传给真正的处理类
         self.args = args
         self.kwargs = kwargs
+        
+        self.semaphore = semaphore
 
     def run(self):
-        target_class = self.target(self.name, *self.args, **self.kwargs)
+        with self.semaphore:
+        
+            target_class = self.target(self.name, *self.args, **self.kwargs)
 
-        try:
-            target_class.main()
-        except Exception as e:
-            e.add_note("看起来线程内部的运行出现了问题。将关闭到客户端的连接。")
-            target_class.log.logger.fatal(
-                f"{self.name}: 看起来线程内部的运行出现了问题：", exc_info=True
-            )
-            target_class.conn.close()
-            sys.exit()
+            try:
+                target_class.main()
+            except ConnectionResetError:
+                target_class.log.logger.info(
+                    f"{self.name}: Connection reset"
+                )
+                sys.exit()
+            except Exception as e:
+                e.add_note("看起来线程内部的运行出现了问题。将关闭到客户端的连接。")
+                target_class.log.logger.fatal(
+                    f"{self.name}: 看起来线程内部的运行出现了问题：", exc_info=True
+                )
+                target_class.conn.close()
+                sys.exit()
 
 
 class ConnHandler:
@@ -81,7 +90,7 @@ class ConnHandler:
         self.kwargs = kwargs
         self.thread_name = thread_name
 
-        self.terminate_event = kwargs["terminate_event"]
+        self.terminate_event = kwargs["threading.terminate_event"]
 
         self.conn = kwargs["conn"]
         self.addr = kwargs["addr"]
@@ -401,11 +410,11 @@ class ConnHandler:
 
         # fake_dir(set to task_id)
         fake_dir = task_id[32:]
-        
+
         # Iterable: allocate fake_id for per file
 
         insert_list = []
-        return_id_dict = {} # file_id: fake_id
+        return_id_dict = {}  # file_id: fake_id
 
         for per_file_id in file_ids:
             this_fake_id = secrets.token_hex(16)
@@ -413,31 +422,35 @@ class ConnHandler:
             if operation == "write":
                 fq_cur.execute(
                     'SELECT * FROM ft_queue WHERE file_id = ? AND operation = "write" AND done = 0 AND expire_time > ?;',
-                    (per_file_id, time.time(),)
+                    (
+                        per_file_id,
+                        time.time(),
+                    ),
                 )
                 query_result = fq_cur.fetchall()
 
                 if query_result and not force_write:
                     raise PendingWriteFileError("文件存在至少一需要写入的任务，且该任务尚未完成")
-                
-            insert_list.append((
-                task_id,
-                username,
-                operation,
-                json.dumps(token_to_store),
-                this_fake_id,
-                fake_dir,
-                per_file_id,
-                expire_time,
-            ))  
 
-            return_id_dict[per_file_id] = this_fake_id   
-            
+            insert_list.append(
+                (
+                    task_id,
+                    username,
+                    operation,
+                    json.dumps(token_to_store),
+                    this_fake_id,
+                    fake_dir,
+                    per_file_id,
+                    expire_time,
+                )
+            )
+
+            return_id_dict[per_file_id] = this_fake_id
 
         fq_cur.executemany(
             "INSERT INTO ft_queue (task_id, username, operation, token, fake_id, fake_dir, file_id, expire_time, done) \
                         VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, 0 );",
-            insert_list
+            insert_list,
         )
 
         fqueue_db.commit()
@@ -449,20 +462,23 @@ class ConnHandler:
         fqueue_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
         fq_cur = fqueue_db.cursor()
 
-        fq_cur.execute("SELECT FROM ft_queue WHERE task_id = ? AND done = 0 AND expire_time > ?", (task_id, time.time()))
+        fq_cur.execute(
+            "SELECT FROM ft_queue WHERE task_id = ? AND done = 0 AND expire_time > ?",
+            (task_id, time.time()),
+        )
         query_result = fq_cur.fetchall()
 
-        if not query_result: # 如果任务已经完成，或并未存在
+        if not query_result:  # 如果任务已经完成，或并未存在
             return False
-        
-        fq_cur.execute("UPDATE ft_queue SET done = -2 WHERE task_id = ? AND done = 0 AND expire_time > ?;", (task_id, time.time()))
+
+        fq_cur.execute(
+            "UPDATE ft_queue SET done = -2 WHERE task_id = ? AND done = 0 AND expire_time > ?;",
+            (task_id, time.time()),
+        )
         fqueue_db.commit()
         fqueue_db.close()
 
         return True
-        
-
-
 
     def permanentlyDeleteFile(self, fake_path_id):
         g_cur = self.db_conn.cursor()
@@ -1239,11 +1255,11 @@ class ConnHandler:
                 return
 
         if avatar_file_id := get_avatar_user["avatar"].get("file_id", None):
-            task_id, task_token, t_filenames = self.createFileTask((avatar_file_id,), user.username)
+            task_id, task_token, t_filenames = self.createFileTask(
+                (avatar_file_id,), user.username
+            )
 
-            mapping = {
-                "": avatar_file_id
-            }
+            mapping = {"": avatar_file_id}
 
             mapped_dict = convertFile2PathID(t_filenames, mapping)
 
@@ -1266,9 +1282,7 @@ class ConnHandler:
                     (default_avatar_id,), user.username
                 )
 
-                mapping = {
-                    "": default_avatar_id
-                }
+                mapping = {"": default_avatar_id}
 
                 mapped_dict = convertFile2PathID(t_filenames, mapping)
 
@@ -1426,9 +1440,9 @@ class ConnHandler:
             (index_file_id,), operation="write", username=user.username
         )
 
-        mapped_dict = convertFile2PathID(t_filenames, {
-            target_file_path_id: index_file_id
-        })
+        mapped_dict = convertFile2PathID(
+            t_filenames, {target_file_path_id: index_file_id}
+        )
 
         self.__send(
             json.dumps(
@@ -1532,12 +1546,13 @@ class ConnHandler:
                         fake_file_ids,
                         expire_time,
                     ) = self.createFileTask(
-                        (query_file_id,), operation="read", expire_time=time.time() + 3600, username=user.username
+                        (query_file_id,),
+                        operation="read",
+                        expire_time=time.time() + 3600,
+                        username=user.username,
                     )
 
-                    mapping = {
-                        file_id: query_file_id
-                    }
+                    mapping = {file_id: query_file_id}
 
                     response = {
                         "code": 0,
@@ -1608,14 +1623,14 @@ class ConnHandler:
                             operation="write",
                             expire_time=time.time() + 3600,
                             force_write=do_force_write,
-                            username=user.username
+                            username=user.username,
                         )
                     except PendingWriteFileError:
                         self.__send(
                             json.dumps({"code": -1, "msg": "file already in use"})
                         )
                         return
-                    
+
                     mapping = {file_id: query_file_id}
 
                     response = {
@@ -1625,7 +1640,9 @@ class ConnHandler:
                             "task_id": task_id,
                             "task_token": task_token,  # original hash after sha256
                             "expire_time": expire_time,
-                            "t_filename": convertFile2PathID(fake_file_ids, mapping),  # 这个ID是客户端上传文件时应当使用的文件名
+                            "t_filename": convertFile2PathID(
+                                fake_file_ids, mapping
+                            ),  # 这个ID是客户端上传文件时应当使用的文件名
                         },
                     }
 
@@ -1878,10 +1895,12 @@ class ConnHandler:
             json.dumps(new_usr_rights),
             json.dumps(new_usr_groups),
             json.dumps(auth_policy["default_new_user_properties"]),
-            None # publickey
+            None,  # publickey
         )
 
-        handle_cursor.execute("INSERT INTO users VALUES(?, ?, ?, ?, ?, ?, ?)", insert_user)
+        handle_cursor.execute(
+            "INSERT INTO users VALUES(?, ?, ?, ?, ?, ?, ?)", insert_user
+        )
 
         self.db_conn.commit()
 
@@ -2435,7 +2454,7 @@ class ConnHandler:
         # 删除用户将必定是永久删除
 
         handle_cursor = self.db_conn.cursor()
-        
+
         if "data" not in loaded_recv:
             self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
@@ -2447,10 +2466,7 @@ class ConnHandler:
         username = loaded_recv["data"].get("username", user.username)
 
         if not username:
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "need a username"
-            }))
+            self.__send(json.dumps({"code": -1, "msg": "need a username"}))
 
         elif username != user.username and action != "get_publickey":
             if not user.hasRights(("edit_other_users",)):
@@ -2462,7 +2478,7 @@ class ConnHandler:
         if not dest_user.ifExists():
             self.__send(json.dumps({"code": 404, "msg": "user not found"}))
             return
-        
+
         dest_user.load()
 
         user_properties = dest_user.properties
@@ -2472,12 +2488,12 @@ class ConnHandler:
             "set_nickname",
             "delete",  # done
             "passwd",  # done
-            "set_rights", # done
+            "set_rights",  # done
             "set_groups",  # done
-            "set_username", # done - not allowed
+            "set_username",  # done - not allowed
             "set_status",
             "set_publickey",  # done
-            "get_publickey"  # done - TODO #13 单设备一公钥
+            "get_publickey",  # done - TODO #13 单设备一公钥
         ]:
             # 因为这里的操作不是路径操作，故只能手动鉴权
 
@@ -2488,75 +2504,78 @@ class ConnHandler:
                 if not user.hasRights(("delete_user",)):
                     self.__send(json.dumps(self.RES_ACCESS_DENIED))
                     return
-                
+
                 if dest_user.username == user.username:
-                    self.__send(json.dumps({"code": -1, "msg": "a user cannot delete itself"}))
+                    self.__send(
+                        json.dumps({"code": -1, "msg": "a user cannot delete itself"})
+                    )
                     return
-                
+
                 ft_conn = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
                 ft_cursor = ft_conn.cursor()
-                
+
                 # 删除任务, 留下已完成的任务供查证
                 # 或许可以改变 done 的值来标记文件 - 任务已取消？
-                ft_cursor.execute("DELETE from ft_queue WHERE username = ? AND done = 0;", (dest_user.username, ))
+                ft_cursor.execute(
+                    "DELETE from ft_queue WHERE username = ? AND done = 0;",
+                    (dest_user.username,),
+                )
                 ft_conn.commit()
                 ft_conn.close()
 
                 # 删除用户
-                handle_cursor.execute("DELETE from users WHERE username = ?;", (dest_user.username, ))
+                handle_cursor.execute(
+                    "DELETE from users WHERE username = ?;", (dest_user.username,)
+                )
                 self.db_conn.commit()
 
                 self.__send(json.dump(self.RES_OK))
                 return
 
-
-            elif action == "set_publickey": # incomplete - does not support device_id
+            elif action == "set_publickey":  # incomplete - does not support device_id
                 new_publickey = loaded_recv["data"].get("publickey", None)
                 if not new_publickey:
                     self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
                     return
-                
+
                 try:
                     RSA.import_key(new_publickey)
                 except (ValueError, IndexError, TypeError):
-                    self.__send(json.dumps({
-                        "code": -1,
-                        "msg": "not a vaild key"
-                    }))
+                    self.__send(json.dumps({"code": -1, "msg": "not a vaild key"}))
                     return
-                
-                handle_cursor.execute("UPDATE users SET publickey = ? WHERE username = ?", (new_publickey, dest_user.username))
+
+                handle_cursor.execute(
+                    "UPDATE users SET publickey = ? WHERE username = ?",
+                    (new_publickey, dest_user.username),
+                )
                 self.db_conn.commit()
 
                 self.__send(json.dumps(self.RES_OK))
                 return
-                
-            elif action == "get_publickey":
 
+            elif action == "get_publickey":
                 if user.username != dest_user.username:
-                
                     if not user.hasRights(("view_others_publickey",)):
                         self.__send(json.dumps(self.RES_ACCESS_DENIED))
                         return
-                
-                if dest_user.publickey:
 
-                    self.__send(json.dumps({
-                        "code": 0,
-                        "msg": "ok",
-                        "data": {
-                            "publickey": dest_user.publickey
-                        }
-                    }))
+                if dest_user.publickey:
+                    self.__send(
+                        json.dumps(
+                            {
+                                "code": 0,
+                                "msg": "ok",
+                                "data": {"publickey": dest_user.publickey},
+                            }
+                        )
+                    )
 
                 else:
-
-                    self.__send(json.dumps({
-                        "code": 404,
-                        "msg": "the user does not have a publickey"
-                    }))
-
-                
+                    self.__send(
+                        json.dumps(
+                            {"code": 404, "msg": "the user does not have a publickey"}
+                        )
+                    )
 
             elif action == "passwd":
                 new_pwd = loaded_recv["data"].get("new_pwd", None)
@@ -2574,67 +2593,69 @@ class ConnHandler:
 
                 salted_pwd = __second_obj.hexdigest()
 
-                handle_cursor.execute("UPDATE users SET hash = ?, salt = ? WHERE username = ?", (salted_pwd, salt, dest_user.username))
+                handle_cursor.execute(
+                    "UPDATE users SET hash = ?, salt = ? WHERE username = ?",
+                    (salted_pwd, salt, dest_user.username),
+                )
 
                 self.db_conn.commit()
 
                 self.__send(json.dumps(self.RES_OK))
 
             elif action == "set_username":
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "not allowed"
-                }))
+                self.__send(json.dumps({"code": -1, "msg": "not allowed"}))
                 return
-            
+
             elif action == "set_groups":
                 if not user.hasRights(("set_usergroups",)):
                     self.__send(json.dumps(self.RES_ACCESS_DENIED))
                     return
-                
+
                 new_groups = loaded_recv["data"].get("new_groups", None)
 
                 if new_groups == None:
                     self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
                     return
-                
+
                 if not StructureValidater.checkGroupStructure(new_groups)[0]:
-                    self.__send(json.dumps({
-                        "code": -1,
-                        "msg": "invaild data structure"
-                    }))
+                    self.__send(
+                        json.dumps({"code": -1, "msg": "invaild data structure"})
+                    )
                     return
-                
-                handle_cursor.execute("UPDATE users SET groups = ? WHERE username = ?", (json.dumps(new_groups), dest_user.username))
+
+                handle_cursor.execute(
+                    "UPDATE users SET groups = ? WHERE username = ?",
+                    (json.dumps(new_groups), dest_user.username),
+                )
 
                 self.__send(json.dumps(self.RES_OK))
 
             elif action == "set_rights":
-                
                 if not user.hasRights(("set_userrights",)):
                     self.__send(json.dumps(self.RES_ACCESS_DENIED))
                     return
-                
+
                 new_rights = loaded_recv["data"].get("new_rights", None)
 
                 if new_rights == None:
                     self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
                     return
-                
+
                 if not StructureValidater.checkRightStructure(new_rights)[0]:
-                    self.__send(json.dumps({
-                        "code": -1,
-                        "msg": "invaild data structure"
-                    }))
+                    self.__send(
+                        json.dumps({"code": -1, "msg": "invaild data structure"})
+                    )
                     return
-                
-                handle_cursor.execute("UPDATE users SET rights = ? WHERE username = ?", (json.dumps(new_rights), dest_user.username))
+
+                handle_cursor.execute(
+                    "UPDATE users SET rights = ? WHERE username = ?",
+                    (json.dumps(new_rights), dest_user.username),
+                )
 
                 self.__send(json.dumps(self.RES_OK))
-
 
         else:
             self.__send(json.dumps(self.RES_BAD_REQUEST))
 
-    def handle_getUserPublicKey(self, loaded_recv, user:Users):
+    def handle_getUserPublicKey(self, loaded_recv, user: Users):
         pass

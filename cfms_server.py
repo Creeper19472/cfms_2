@@ -15,7 +15,6 @@ import include.logtool as logtool
 from include.connThread import * 
 from Crypto.PublicKey import RSA
 
-# import include.filesrv_deprecated.ftserver as ftserver
 import include.fileftp.pyftpd as pyftpd
 
 import secrets
@@ -435,13 +434,13 @@ def mainloop(serverd):
         log.logger.info(f"connection address: {addr!s}")
         
         Thread = ConnThreads(
-            target=ConnHandler, name=thread_name, args=(), kwargs={
+            target=ConnHandler, semaphore=sem, name=thread_name, args=(), kwargs={
                 "conn": conn,
                 "addr": addr,
                 "db_conn": maindb.conn,
                 "toml_config": config,
                 "root_abspath": root_abspath,
-                "terminate_event": terminate_event
+                "threading.terminate_event": terminate_event
             }
         )
         Thread.daemon = True
@@ -564,12 +563,18 @@ if __name__ == "__main__":
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
     ipv4_addr = (config["connect"]["ipv4_addr"], config["connect"]["port"])
     ipv6_addr = (config["connect"]["ipv6_addr"], config["connect"]["port"])
+
+    semaphore_count = config["connect"]["max_handlers"]
+    max_queue = config["connect"]["max_queued_connections"]
+
+    sem = threading.Semaphore(semaphore_count)
+
     if config["connect"]["ipv4_enabled"]:
         server.bind(ipv4_addr)
-        server.listen(0)
+        server.listen(max_queue)
     if config["connect"]["ipv6_enabled"]:
         server.bind(ipv6_addr)
-        server.listen(0)
+        server.listen(max_queue)
 
     if config["connect"]["ipv4_enabled"]:
         log.logger.info((f"IPv4 Address: {ipv4_addr}"))
