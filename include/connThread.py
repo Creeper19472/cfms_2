@@ -243,11 +243,17 @@ class ConnHandler:
         )
         es.install()
 
-        if not self._doFirstCommunication(conn):
-            conn.close()
+        try:
+            if not self._doFirstCommunication(conn):
+                conn.close()
+                sys.exit()
+            else:
+                self.__send(json.dumps({"msg": "ok", "code": 0}))  # 发送成功回答
+        except:
+            self.log.logger.info(f"{self.addr}: Handshake failed.")
+            self.log.logger.debug(f"{self.addr}: Error details for this handshake process:", exc_info=True)
+            self.conn.close()
             sys.exit()
-        else:
-            self.__send(json.dumps({"msg": "ok", "code": 0}))  # 发送成功回答
 
         while not self.terminate_event.is_set():
             try:
@@ -904,9 +910,6 @@ class ConnHandler:
         elif loaded_recv["request"] == "operateUser":
             self.handle_operateUser(loaded_recv)
 
-        elif loaded_recv["request"] == "getDir":
-            self.handle_getDir(loaded_recv)
-
         elif loaded_recv["request"] == "getRootDir":
             self.handle_getRootDir(loaded_recv)
 
@@ -1015,131 +1018,20 @@ class ConnHandler:
             self.__send(json.dumps({"code": 401, "msg": "invaild token or username"}))
 
     @userOperationAuthWrapper
-    def handle_getDir(self, recv, user: object):  # 诸如此类带 user 参数的才可使用 Wrapper
-        path_id = recv["data"].get("id")
-
-        if not path_id:
-            self.__send(json.dumps({"code": -1, "msg": "no path_id provided"}))
-
-        handle_cursor = self.db_conn.cursor()
-
-        handle_cursor.execute(
-            "SELECT type, parent_id FROM path_structures WHERE id = ?", (path_id,)
-        )
-
-        result = handle_cursor.fetchone()
-
-        if result:
-            tg_type = result[0]
-            parent_id = result[1]
-        else:
-            self.__send(json.dumps({"code": -1, "msg": "no such file or directory"}))
-            return
-
-        del result
-
-        if tg_type == "file":
-            self.__send(
-                json.dumps(
-                    {"code": -1, "msg": "type 'file' does not have a dir function"}
-                )
-            )
-            return
-
-        elif tg_type == "dir":
-            if not self.verifyUserAccess(path_id, "read", user):
-                self.__send(json.dumps({"code": 403, "msg": "permission denied"}))
-                self.log.logger.debug("权限校验失败：无权访问")
-                return
-
-            handle_cursor.execute(
-                "SELECT id, name, type, properties FROM path_structures WHERE parent_id = ?",
-                (path_id,),
-            )
-            all_result = handle_cursor.fetchall()
-
-            dir_result = dict()
-
-            for i in all_result:
-                if not self.verifyUserAccess(
-                    i[0], "read", user
-                ):  # 检查该目录下的文件是否有权访问，如无则隐藏
-                    if self.config["security"]["hide_when_no_access"]:
-                        continue
-                    else:
-                        pass
-
-                original_properties = json.loads(i[3])
-
-                filtered_properties = self.filterPathProperties(original_properties)
-
-                if i[2] == "file":
-                    filtered_properties["size"] = self.getFileSize(i[0])
-
-                # print(i)
-                dir_result[i[0]] = {
-                    "name": i[1],
-                    "type": i[2],
-                    "properties": filtered_properties,
-                }
-
-            por_policy = Policies("permission_on_rootdir", self.db_conn)
-
-            if parent_id:
-                if self.verifyUserAccess(parent_id, "read", user):  # 检查是否有权访问父级目录
-                    handle_cursor.execute(
-                        "SELECT name, type, properties FROM path_structures WHERE parent_id = ?",
-                        (path_id,),
-                    )
-                    parent_result = handle_cursor.fetchone()
-
-                    parent_properties = json.loads(parent_result[2])
-
-                    if parent_result[1] != "dir":
-                        raise RuntimeError("父级目录并非一个文件夹")
-
-                    dir_result[parent_id] = {
-                        "name": parent_result[0],
-                        "type": "dir",
-                        "parent": True,
-                        "properties": self.filterPathProperties(parent_properties),
-                    }
-
-            else:  # 如果父级目录是根目录，检查是否有权访问根目录
-                self.log.logger.debug(f"目录 {path_id} 的上级目录为根目录。正在检查用户是否有权访问根目录...")
-
-                por_access_rules = por_policy["rules"]["access_rules"]
-                por_external_access = por_policy["rules"]["external_access"]
-
-                if not self._verifyAccess(
-                    user, "read", por_access_rules, por_external_access, True
-                ):
-                    self.log.logger.debug("用户无权访问根目录")
-                else:
-                    self.log.logger.debug("根目录鉴权成功")
-
-                    dir_result[""] = {
-                        "name": "<root directory>",
-                        "type": "dir",
-                        "parent": True,
-                        "properties": {}
-                        # "properties": self.filterPathProperties(parent_properties)
-                    }
-
-            self.__send(json.dumps({"code": 0, "dir_data": dir_result}))
-
-        else:
-            self.log.logger.error(
-                f"错误：数据库中 path_id 为 {path_id} 的条目的 type 为意料之外的值： {tg_type}"
-            )
-            self.__send(json.dumps({"code": 500, "msg": "internal server error"}))
-
-    @userOperationAuthWrapper
     def handle_getRootDir(self, loaded_recv, user: Users):
         por_policy = Policies("permission_on_rootdir", self.db_conn)
 
         por_access_rules = por_policy["rules"]["access_rules"]
         por_external_access = por_policy["rules"]["external_access"]
+
+        # 增加对 view_deleted 的判断
+        view_deleted = loaded_recv["data"].get("view_deleted", False)
+
+        if view_deleted:  # 如果启用 view_deleted 选项
+            if not user.hasRights(("view_deleted",)):
+                self.__send(json.dumps(self.RES_ACCESS_DENIED))
+                return
+
 
         if not self._verifyAccess(
             user, "read", por_access_rules, por_external_access, True
@@ -1153,7 +1045,7 @@ class ConnHandler:
         handle_cursor = self.db_conn.cursor()
 
         handle_cursor.execute(
-            "SELECT id, name, type, properties FROM path_structures WHERE parent_id = ?",
+            "SELECT id, name, type, properties, state FROM path_structures WHERE parent_id = ?",
             ("",),
         )
         all_result = handle_cursor.fetchall()
@@ -1161,6 +1053,12 @@ class ConnHandler:
         dir_result = dict()
 
         for i in all_result:
+            this_object_state = json.loads(i[4])
+
+            if this_object_state["code"] == "deleted":
+                if not view_deleted:
+                    continue
+
             if not self.verifyUserAccess(i[0], "read", user):  # 检查该目录下的文件是否有权访问，如无则隐藏
                 if self.config["security"]["hide_when_no_access"]:
                     continue
@@ -1178,6 +1076,7 @@ class ConnHandler:
             dir_result[i[0]] = {
                 "name": i[1],
                 "type": i[2],
+                "state": this_object_state,
                 "properties": filtered_properties,
             }
 
@@ -1324,8 +1223,7 @@ class ConnHandler:
         )
 
         if not target_file_path_id:
-            self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
-            return
+            target_file_path_id = secrets.token_hex(8)
 
         handle_cursor = self.db_conn.cursor()
 
@@ -2106,6 +2004,8 @@ class ConnHandler:
                 if not view_deleted:
                     self.__send(json.dumps(self.RES_NOT_FOUND))
                     return
+                
+        parent_id = result[0][1] # 文件夹的父级目录 ID
 
         if action in [
             "list",
@@ -2123,7 +2023,89 @@ class ConnHandler:
                 return
 
             if action == "list":
-                self.handle_getDir(loaded_recv)
+
+                handle_cursor.execute(
+                    "SELECT id, name, type, properties, state FROM path_structures WHERE parent_id = ?",
+                    (dir_id,),
+                )
+                all_result = handle_cursor.fetchall()
+
+                dir_result = dict()
+
+                for i in all_result:
+                    this_object_state = json.loads(i[4])
+
+                    if this_object_state["code"] == "deleted": # 如果已被删除
+                        if not view_deleted:
+                            continue
+
+                    if not self.verifyUserAccess(
+                        i[0], "read", user
+                    ):  # 检查该目录下的文件是否有权访问，如无则隐藏
+                        if self.config["security"]["hide_when_no_access"]:
+                            continue
+                        else:
+                            pass
+
+                    original_properties = json.loads(i[3])
+
+                    filtered_properties = self.filterPathProperties(original_properties)
+
+                    if i[2] == "file":
+                        filtered_properties["size"] = self.getFileSize(i[0])
+
+                    # print(i)
+                    dir_result[i[0]] = {
+                        "name": i[1],
+                        "type": i[2],
+                        "state": this_object_state,  # dict
+                        "properties": filtered_properties,
+                    }
+
+                por_policy = Policies("permission_on_rootdir", self.db_conn)
+
+                if parent_id:
+                    if self.verifyUserAccess(parent_id, "read", user):  # 检查是否有权访问父级目录
+                        handle_cursor.execute(
+                            "SELECT name, type, properties FROM path_structures WHERE id = ?",
+                            (parent_id,),
+                        )
+                        parent_result = handle_cursor.fetchone()
+
+                        parent_properties = json.loads(parent_result[2])
+
+                        if parent_result[1] != "dir":
+                            raise RuntimeError("父级目录并非一个文件夹")
+
+                        dir_result[parent_id] = {
+                            "name": parent_result[0],
+                            "type": "dir",
+                            "parent": True,
+                            "properties": self.filterPathProperties(parent_properties),
+                        }
+
+                else:  # 如果父级目录是根目录，检查是否有权访问根目录
+                    self.log.logger.debug(f"目录 {dir_id} 的上级目录为根目录。正在检查用户是否有权访问根目录...")
+
+                    por_access_rules = por_policy["rules"]["access_rules"]
+                    por_external_access = por_policy["rules"]["external_access"]
+
+                    if not self._verifyAccess(
+                        user, "read", por_access_rules, por_external_access, True
+                    ):
+                        self.log.logger.debug("用户无权访问根目录")
+                    else:
+                        self.log.logger.debug("根目录鉴权成功")
+
+                        dir_result[""] = {
+                            "name": "<root directory>",
+                            "type": "dir",
+                            "parent": True,
+                            "properties": {}
+                            # "properties": self.filterPathProperties(parent_properties)
+                        }
+
+                self.__send(json.dumps({"code": 0, "dir_data": dir_result}))
 
             elif action == "delete":
                 recycle_policy = Policies("recycle", self.db_conn)

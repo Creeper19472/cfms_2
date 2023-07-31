@@ -288,7 +288,7 @@ while count < 10:
     object_conn.send(json.dumps(
         {
             "version": 1,
-            "request": "uploadFile",
+            "request": "createFile",
             "data": {
                 "directory_id": "",
                 "file_id": "testupload1",

@@ -4,6 +4,7 @@ import threading
 import time
 
 import sys
+from include.logtool import getCustomLogger
 sys.path.append("./include/") # relative hack
 
 from modules.pyftpdlib.servers import ThreadedFTPServer  # <-
@@ -15,7 +16,10 @@ import hashlib
 import secrets, shutil
 import sqlite3
 
+from include.logtool import getCustomLogger
+
 from modules.pyftpdlib.log import logger
+# logger = getCustomLogger("main.pyftpdlib", filepath="./content/logs/pyftpd.log")
 
 from modules.pyftpdlib.handlers import FTPHandler
 from modules.pyftpdlib.handlers import TLS_FTPHandler
@@ -23,6 +27,9 @@ from modules.pyftpdlib.handlers import TLS_FTPHandler
 from modules.pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 
 import logging
+
+import re
+
 
 if os.name == "nt":
     import ctypes
@@ -76,20 +83,19 @@ class FTPCustomizedHandler(TLS_FTPHandler):
 
         return_code = 0
 
-        if self.authorizer.operation == "write":
+        if self.authorizer.user_table[self.username]["operation"] == "write":
+            # print("write function detected")
 
-            if os.path.exists(f"{self.authorizer.fake_abspath}/{self.authorizer.fake_file_id}"):
+            if (fake_filename:=re.split(r"/|\\", file)[-1]) in self.authorizer.user_table[self.username]['files']:
+                # print("in files")
 
                 try:
-                    shutil.copyfile(self.authorizer.fake_abspath+"/"+self.authorizer.fake_file_id, self.authorizer.real_file_path)
+                    shutil.copyfile(file, self.authorizer.user_table[self.username]["files"][fake_filename])
                 except Exception as e:
-                    logging.error("在复制文件时出现问题。", exc_info=True)
+                    logger.error("在复制文件时出现问题。", exc_info=True)
                     return_code = -1
-            
-            else: 
 
-                logging.debug("文件上传确已完成，但指定名称的文件并不存在.")
-                return_code = -1
+        # print(fake_filename)
 
         fq_cursor.execute("UPDATE ft_queue SET done = ? WHERE task_id = ?;" , (return_code, self.username))
 
@@ -197,6 +203,8 @@ class DummyMD5Authorizer(DummyAuthorizer):
             # print("not exists")
             os.makedirs(fake_abspath)
 
+        files_dict = {}
+
         # 遍历文件列表，执行复制（链接）操作
         for i in query_results:
             file_id, fake_id = i[0], i[1]
@@ -206,6 +214,9 @@ class DummyMD5Authorizer(DummyAuthorizer):
             real_file_path = g_cursor.fetchone()[0]
 
             if real_file_path:
+
+                # 存储 fake ID 与路径的对应关系
+                files_dict[fake_id] = real_file_path
 
                 if operation == "read":
                     # print("read mode detected")
@@ -245,7 +256,8 @@ class DummyMD5Authorizer(DummyAuthorizer):
             'msg_login': str(msg_login),
             'msg_quit': str(msg_quit),
             'home': fake_abspath,
-            'operation': operation
+            'operation': operation,
+            'files': files_dict
             }
         self.user_table[username] = dic
 
@@ -282,24 +294,12 @@ def main(root_abspath, shutdown_event: threading.Event, addr: tuple):
     handler.authorizer = authorizer
     server = ThreadedFTPServer(addr, handler)
 
-    lfhandler = logging.FileHandler(filename=f"{ROOT_ABSPATH}/content/logs/pyftpd.log")
-    cshandler = logging.StreamHandler()
-    formatter1 = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    formatter2 = logging.Formatter("[%(asctime)s %(levelname)s] %(message)s")
-    lfhandler.setLevel(logging.DEBUG)
-    # lfhandler.setLevel(logging.INFO)
-    cshandler.setLevel(logging.INFO)
-    lfhandler.setFormatter(formatter1)
-    cshandler.setFormatter(formatter2)
-
-    logging.basicConfig(handlers=(lfhandler, cshandler), level=logging.DEBUG)
+    # logging.basicConfig(handlers=(lfhandler, cshandler), level=logging.DEBUG)
 
     while not shutdown_event.is_set():
         server.serve_forever(blocking=False)
 
-    logging.info(
+    logger.info(
         ">>> shutting down FTP server (%s active workers) <<<",
         server._map_len())
     

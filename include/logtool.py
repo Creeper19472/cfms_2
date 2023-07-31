@@ -7,7 +7,7 @@ logtool.py
 可能存在尚待完善的部分。
 """
 
-class LogClass(object):
+class LogClass(object): # 已弃用
     def __init__(
         self, logname, level=(logging.DEBUG, logging.INFO), filepath="default.log"
     ):
@@ -29,3 +29,23 @@ class LogClass(object):
         self.logger.addHandler(self.cshandler)
 
         self.__call__ = self.logger
+
+def getCustomLogger(logname, level=(logging.DEBUG, logging.INFO), filepath="default.log"):
+    logger = logging.getLogger(logname)
+    logger.setLevel(level=logging.DEBUG)  # This level must be 'logging.DEBUG'.
+    logger.propagate = 0
+    lfhandler = logging.FileHandler(filename=filepath)
+    cshandler = logging.StreamHandler()
+    formatter1 = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    formatter2 = logging.Formatter("[%(asctime)s %(levelname)s] %(message)s")
+    lfhandler.setLevel(level[0])
+    cshandler.setLevel(level[1])
+    lfhandler.setFormatter(formatter1)
+    cshandler.setFormatter(formatter2)
+    logger.addHandler(lfhandler)
+    logger.addHandler(cshandler)
+
+
+    return logger

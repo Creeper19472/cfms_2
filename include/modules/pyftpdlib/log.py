@@ -24,10 +24,11 @@ except ImportError:
 from ._compat import PY3
 from ._compat import unicode
 
+from include.logtool import getCustomLogger
 
 # default logger
-logger = logging.getLogger('pyftpdlib')
-
+# logger = logging.getLogger('pyftpdlib')
+logger = getCustomLogger('main.pyftpdlib', filepath='content/logs/pyftpd.log')
 
 def _stderr_supports_color():
     color = False

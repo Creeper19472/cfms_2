@@ -39,6 +39,10 @@ show_login_fail_details = false
 [database]
 db_name = "general.db"
 
+[cron]
+do_clean_job_interval = 600
+# 间隔多少秒执行过期文件的删除任务？
+
 [debug]
 debug = true
 

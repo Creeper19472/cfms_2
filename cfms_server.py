@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "230725_alpha")
+CORE_VERSION = (1, 0, 0, "230731_alpha")
 READABLE_VERSION = f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
 
 
@@ -16,9 +16,12 @@ from include.connThread import *
 from Crypto.PublicKey import RSA
 
 import include.fileftp.pyftpd as pyftpd
+import include.taskScheduler as taskScheduler
 
 import secrets
 import string
+
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # 初始化 terminate_event
 terminate_event = threading.Event()
@@ -595,7 +598,18 @@ if __name__ == "__main__":
                                         name="FTPServerThread")
     FTPServerThread.start()
 
+    # 初始化 Cron
+    log.logger.info("正在注册计划任务...")
+    SchedulerThread = threading.Thread(target=taskScheduler.main, \
+                                        args=(root_abspath, terminate_event),\
+                                        name="SchedulerThread")
+    SchedulerThread.start()
+
     endtime = time.time()
     log.logger.info(f"完成（{endtime - starttime} s）！")
+
+    mainloopThread.join() # 主线程保活，以支持计划任务运行
+
+    sys.exit()
 
 
