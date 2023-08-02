@@ -1,8 +1,0 @@
-{
-    "iis.configDir": "",
-    "[python]": {
-        "editor.defaultFormatter": "ms-python.black-formatter"
-    },
-    "python.formatting.provider": "none",
-    "esbonio.sphinx.confDir": ""
-}
