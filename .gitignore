@@ -10,6 +10,9 @@ content/temp/
 content/fqueue.db
 content/auth/
 
+# Local config files
+config.toml
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
