@@ -92,6 +92,9 @@ class ConnHandler:
 
         self.terminate_event = kwargs["threading.terminate_event"]
 
+        global SYS_LOCKS
+        SYS_LOCKS = kwargs["sys_locks"]
+
         self.conn = kwargs["conn"]
         self.addr = kwargs["addr"]
 
@@ -270,7 +273,10 @@ class ConnHandler:
             except ConnectionResetError:
                 self.log.logger.info(f"{self.addr}: Connection reset")
                 sys.exit()
-
+            except TimeoutError:
+                self.log.logger.info(f"{self.addr}: Connection timed out. Disconnecting.")
+                self.conn.close()
+                sys.exit()
             # print(f"recv: {recv}")
 
             try:
@@ -454,8 +460,8 @@ class ConnHandler:
             return_id_dict[per_file_id] = this_fake_id
 
         fq_cur.executemany(
-            "INSERT INTO ft_queue (task_id, username, operation, token, fake_id, fake_dir, file_id, expire_time, done) \
-                        VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, 0 );",
+            "INSERT INTO ft_queue (task_id, username, operation, token, fake_id, fake_dir, file_id, expire_time, done, cleared) \
+                        VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, 0, 0 );",
             insert_list,
         )
 
@@ -700,7 +706,12 @@ class ConnHandler:
         # cleanup
         g_cur.close()
 
-        return os.path.getsize(this_real_file_result[0])
+        if SYS_LOCKS["SYS_IOLOCK"].acquire(timeout=0.75):
+            filesize = os.path.getsize(this_real_file_result[0])
+            SYS_LOCKS["SYS_IOLOCK"].release()
+            return filesize
+        else: # 如果超时
+            return -1
 
     def filterPathProperties(self, properties: dict):
         result = properties
@@ -1259,7 +1270,7 @@ class ConnHandler:
                     json.dumps({"code": 404, "msg": "target directory not found"})
                 )
                 return
-            elif len(dir_query_result) >= 1:
+            elif len(dir_query_result) > 1:
                 raise RuntimeError("数据库出现了不止一条同id的记录")
 
             if (d_id_type := dir_query_result[0][0]) != "dir":
@@ -1745,6 +1756,8 @@ class ConnHandler:
         new_usr_username = loaded_recv["data"].get("username", None)
         new_usr_pwd = loaded_recv["data"].get("password", None)
 
+        new_usr_nickname = loaded_recv["data"].get("nickname", new_usr_username)
+
         if not new_usr_username or not new_usr_pwd:
             self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
@@ -1790,6 +1803,7 @@ class ConnHandler:
             new_usr_username,
             salted_pwd,
             salt,
+            new_usr_nickname,
             json.dumps(new_usr_rights),
             json.dumps(new_usr_groups),
             json.dumps(auth_policy["default_new_user_properties"]),
@@ -1797,7 +1811,7 @@ class ConnHandler:
         )
 
         handle_cursor.execute(
-            "INSERT INTO users VALUES(?, ?, ?, ?, ?, ?, ?)", insert_user
+            "INSERT INTO users VALUES(?, ?, ?, ?, ?, ?, ?, ?)", insert_user
         )
 
         self.db_conn.commit()
@@ -2359,7 +2373,7 @@ class ConnHandler:
                     json.dumps({"code": 404, "msg": "target directory not found"})
                 )
                 return
-            elif len(dir_query_result) >= 1:
+            elif len(dir_query_result) > 1:
                 raise RuntimeError("数据库出现了不止一条同id的记录")
 
             if (d_id_type := dir_query_result[0][0]) != "dir":
@@ -2370,7 +2384,7 @@ class ConnHandler:
                 self.__send(json.dumps({"code": -1, "msg": "not a directory"}))
                 return
 
-            if not self.verifyUserAccess(target_id, "write", user):
+            if not self.verifyUserAccess(target_parent_id, "write", user):
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
 

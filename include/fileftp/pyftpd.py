@@ -16,8 +16,6 @@ import hashlib
 import secrets, shutil
 import sqlite3
 
-from include.logtool import getCustomLogger
-
 from modules.pyftpdlib.log import logger
 # logger = getCustomLogger("main.pyftpdlib", filepath="./content/logs/pyftpd.log")
 
@@ -34,7 +32,7 @@ import re
 if os.name == "nt":
     import ctypes
 
-    def isSystemAdmin():
+    def isSystemAdmin() -> bool:
 
         try:
             return ctypes.windll.shell32.IsUserAnAdmin()
@@ -67,9 +65,13 @@ class FTPCustomizedHandler(TLS_FTPHandler):
         fq_db = sqlite3.connect(f"{ROOT_ABSPATH}/content/fqueue.db")
         fq_cursor = fq_db.cursor()
 
-        # print(type(username))
+        fake_filename = re.split(r"/|\\", file)[-1]
 
-        fq_cursor.execute("UPDATE ft_queue SET done = 1 WHERE task_id = ?;" , (self.username,))
+        # print(type(username))
+        if fake_filename in (fd:=self.authorizer.user_table[self.username]["files"]):
+            del fd[fake_filename]
+
+            fq_cursor.execute("UPDATE ft_queue SET done = 1 WHERE task_id = ? AND fake_id = ?;" , (self.username, fake_filename))
 
         fq_db.commit()
         fq_db.close()
@@ -81,23 +83,31 @@ class FTPCustomizedHandler(TLS_FTPHandler):
         fq_db = sqlite3.connect(f"{ROOT_ABSPATH}/content/fqueue.db")
         fq_cursor = fq_db.cursor()
 
-        return_code = 0
+        done = 1
 
-        if self.authorizer.user_table[self.username]["operation"] == "write":
-            # print("write function detected")
+        if (fake_filename:=re.split(r"/|\\", file)[-1]) in self.authorizer.user_table[self.username]['files']:
 
-            if (fake_filename:=re.split(r"/|\\", file)[-1]) in self.authorizer.user_table[self.username]['files']:
-                # print("in files")
+            if self.authorizer.user_table[self.username]["operation"] == "write":
+                realpath = self.authorizer.user_table[self.username]["files"][fake_filename]
+                # print("write")
+                if os.name == "nt" and isSystemAdmin() and tuple(map(int, platform.version().split("."))) >= (10, 0):
+                    with SYS_LOCKS["SYS_IOLOCK"]:
+                        os.remove(realpath) # 删除原有文件以便建立新硬连接
+                        os.system(f'mklink /H "{realpath}" {file}')
 
-                try:
-                    shutil.copyfile(file, self.authorizer.user_table[self.username]["files"][fake_filename])
-                except Exception as e:
-                    logger.error("在复制文件时出现问题。", exc_info=True)
-                    return_code = -1
+                elif os.name == "posix" and os.geteuid() == 0:
+                    os.remove(realpath)
+                    os.system(f"ln {file} {realpath} -s ")
 
-        # print(fake_filename)
+                else:
+                    try:
+                        shutil.copyfile(file, realpath)
+                    except Exception as e:
+                        logger.error("在复制文件时出现问题。", exc_info=True)
+                        done = -1
 
-        fq_cursor.execute("UPDATE ft_queue SET done = ? WHERE task_id = ?;" , (return_code, self.username))
+            # print("executing")
+            fq_cursor.execute("UPDATE ft_queue SET done = ? WHERE task_id = ? AND fake_id = ?;" , (done, self.username, fake_filename))
 
         fq_db.commit()
         fq_db.close()
@@ -225,20 +235,13 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
                     if not os.path.isfile(f"{fake_abspath}/{fake_id}"): # slow
 
-                        if os.name == "nt" and tuple(map(int, platform.version().split("."))) >= (10, 0): # 试图优化 IO 开销
+                        if os.name == "nt" and isSystemAdmin() and tuple(map(int, platform.version().split("."))) >= (10, 0): # 试图优化 IO 开销
 
-                            if isSystemAdmin():
-                                # print("Admin")
-                                os.system(f'mklink /H "{fake_abspath}/{fake_id}" {real_file_abspath}')
-                            else:
-                                # print("Copying file")
-                                shutil.copyfile(real_file_abspath, f"{fake_abspath}/{fake_id}")
+                            os.system(f'mklink /H "{fake_abspath}/{fake_id}" {real_file_abspath}')
 
-                        elif os.name == "posix":
-                            try:
-                                os.system(f"ln {real_file_abspath} {fake_abspath}/{fake_id} -s ")
-                            except OSError:
-                                shutil.copyfile(real_file_abspath, f"{fake_abspath}/{fake_id}")
+                        elif os.name == "posix" and os.geteuid() == 0:
+                            
+                            os.system(f"ln {real_file_abspath} {fake_abspath}/{fake_id} -s ")
 
                         else:
                             # print("else copyfile")
@@ -274,9 +277,12 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
 
 
-def main(root_abspath, shutdown_event: threading.Event, addr: tuple):
+def main(root_abspath, shutdown_event: threading.Event, addr: tuple, locks: dict):
     global ROOT_ABSPATH
     ROOT_ABSPATH = root_abspath
+
+    global SYS_LOCKS
+    SYS_LOCKS = locks
 
     # sys.path.append(f"{ROOT_ABSPATH}/include/") # 增加导入位置
 

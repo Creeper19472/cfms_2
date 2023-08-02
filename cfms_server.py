@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "230731_alpha")
+CORE_VERSION = (1, 0, 0, "230802_alpha")
 READABLE_VERSION = f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
 
 
@@ -26,6 +26,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # 初始化 terminate_event
 terminate_event = threading.Event()
 
+SYS_IOLOCK = threading.RLock()
+
+SYS_LOCKS = {
+    "SYS_IOLOCK": SYS_IOLOCK
+}
 
 class DB_Sqlite3(object):
     def __init__(self, filename):
@@ -45,7 +50,7 @@ class DB_Sqlite3(object):
 
 def dbInit(db_object: DB_Sqlite3):
     cur = db_object.conn.cursor()
-    cur.execute("CREATE TABLE users(username TEXT, hash TEXT, salt TEXT, rights BLOB, groups BLOB, properties BLOB, publickey TEXT)")
+    cur.execute("CREATE TABLE users(username TEXT, hash TEXT, salt TEXT, nickname TEXT, rights BLOB, groups BLOB, properties BLOB, publickey TEXT)")
     """
     rights: 额外权限。接受列表输入。
     此栏包含的权限将附加于用户个人。
@@ -112,10 +117,10 @@ def dbInit(db_object: DB_Sqlite3):
     }
 
     insert_users = (
-        ("admin", sha256, salt, json.dumps(user_rights), json.dumps(user_groups), json.dumps(user_properties), None), 
-        ("guest", sha256, salt, json.dumps({}), json.dumps({}), json.dumps(user_properties), None)
+        ("admin", sha256, salt, "Administrator", json.dumps(user_rights), json.dumps(user_groups), json.dumps(user_properties), None), 
+        ("guest", sha256, salt, "Guest", json.dumps({}), json.dumps({}), json.dumps(user_properties), None)
     )
-    cur.executemany("INSERT INTO users VALUES(?, ?, ?, ?, ?, ?, ?)", insert_users)
+    cur.executemany("INSERT INTO users VALUES(?, ?, ?, ?, ?, ?, ?, ?)", insert_users)
 
     # 新建文档索引表
     
@@ -312,7 +317,7 @@ def dbInit(db_object: DB_Sqlite3):
     # create file transport queue table
     fQ_cur.execute(
         "CREATE TABLE ft_queue\
-            (task_id TEXT, username TEXT, token TEXT, operation TEXT, file_id TEXT, fake_id TEXT, fake_dir TEXT, expire_time INTEGER, done INTEGER)"
+            (task_id TEXT, username TEXT, token TEXT, operation TEXT, file_id TEXT, fake_id TEXT, fake_dir TEXT, expire_time INTEGER, done INTEGER, cleared INTEGER)"
         )
     # file_id: 存贮在 document_indexes 中的文件id
     # fake_id: 这个 id 将作为 ftp 服务中以 task_id 为账户名的用户目录下的文件名。
@@ -443,7 +448,8 @@ def mainloop(serverd):
                 "db_conn": maindb.conn,
                 "toml_config": config,
                 "root_abspath": root_abspath,
-                "threading.terminate_event": terminate_event
+                "threading.terminate_event": terminate_event,
+                "sys_locks": SYS_LOCKS
             }
         )
         Thread.daemon = True
@@ -594,7 +600,9 @@ if __name__ == "__main__":
     # 初始化 FTPServer
     log.logger.info(f'正在初始化 FTP 服务... 端口开放在 {config["connect"]["ftp_port"]}.')
     FTPServerThread = threading.Thread(target=pyftpd.main, \
-                                        args=(root_abspath, terminate_event, (config["connect"]["ipv4_addr"], config["connect"]["ftp_port"])),\
+                                        args=(root_abspath, terminate_event, \
+                                              (config["connect"]["ipv4_addr"], config["connect"]["ftp_port"]),
+                                              SYS_LOCKS),
                                         name="FTPServerThread")
     FTPServerThread.start()
 

@@ -1,4 +1,5 @@
 import logging
+from logging.handlers import RotatingFileHandler
 
 """
 logtool.py
@@ -15,7 +16,7 @@ class LogClass(object): # 已弃用
         self.logger = logging.getLogger(logname)
         self.logger.setLevel(level=logging.DEBUG)  # This level must be 'logging.DEBUG'.
         self.logger.propagate = 0
-        self.lfhandler = logging.FileHandler(filename=filepath)
+        self.lfhandler = RotatingFileHandler(filename=filepath, maxBytes=10485760, backupCount=1)
         self.cshandler = logging.StreamHandler()
         formatter1 = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -34,7 +35,7 @@ def getCustomLogger(logname, level=(logging.DEBUG, logging.INFO), filepath="defa
     logger = logging.getLogger(logname)
     logger.setLevel(level=logging.DEBUG)  # This level must be 'logging.DEBUG'.
     logger.propagate = 0
-    lfhandler = logging.FileHandler(filename=filepath)
+    lfhandler = RotatingFileHandler(filename=filepath, maxBytes=10485760, backupCount=1)
     cshandler = logging.StreamHandler()
     formatter1 = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

@@ -21,7 +21,7 @@ def _permanentlyDeleteFile(fake_path_id, db_conn):
     query_result = g_cur.fetchall()
 
     if len(query_result) == 0:
-        raise FileNotFoundError
+        return
     elif len(query_result) > 1:
         raise ValueError("在查询表 path_structures 时发现不止一条同路径 id 的记录")
 
@@ -86,6 +86,9 @@ def _permanentlyDeleteDir(path_id, db_conn): # 这将导致其下所有文件被
 
     query_result = g_cur.fetchall()
 
+    if not query_result:
+        return
+
     for i in query_result:
         this_object_type = query_result[0]
         this_object_id = query_result[1]
@@ -136,9 +139,37 @@ def task_clearExpiredFile():
 
     if count:
         logger.info(f"过期文件清理完成，处理了 {count} 个项目")
-    else:
-        logger.info("过期文件清理完成，没什么要做的")
+    # else:
+    #     logger.info("过期文件清理完成，没什么要做的")
 
+def task_clearFTPCache():
+
+    ftdb = sqlite3.connect(f"{ROOT_ABSPATH}/content/fqueue.db")
+    f_cur = ftdb.cursor()
+
+    f_cur.execute("SELECT task_id, fake_id, fake_dir FROM ft_queue WHERE (expire_time < ? OR done != 0 ) AND cleared = 0", (time.time(),))
+    query_result = f_cur.fetchall()
+
+    count = 0
+
+    for i in query_result:
+        f_cur.execute("UPDATE ft_queue SET cleared = 1 WHERE task_id = ?", (i[0],))
+
+        temp_path = f"{ROOT_ABSPATH}/content/temp/{i[2]}/"
+
+        if os.path.exists(this_file_path:=temp_path+i[1]):
+            os.remove(this_file_path)
+            count += 1
+
+        if os.path.exists(temp_path) and not os.listdir(temp_path):
+            os.rmdir(temp_path)
+
+
+    ftdb.commit()
+    ftdb.close()
+
+    if count:
+        logger.info(f"清理了传输临时文件，处理了 {count} 个项目")
 
 def main(root_abspath, terminate_event: threading.Event, logfile: str = "cron.log"):
 
@@ -177,12 +208,16 @@ def main(root_abspath, terminate_event: threading.Event, logfile: str = "cron.lo
         warnings.warn("您确定设置是正确的吗? do_clean_job_interval 看起来被设置为\
                       空。请使用不为零的正数来设置其时间。", category=RuntimeWarning)
         
+    do_clear_cache_job_interval = config["cron"]["do_clear_cache_job_interval"]
+
+    if do_clear_cache_job_interval:
+        scheduler.add_job(task_clearFTPCache, 'interval', seconds=do_clear_cache_job_interval)
+        
     # 启动调度器
     scheduler.start()
     # print(aps_logger.handlers)
 
-    while not terminate_event.is_set():
-        time.sleep(1)
+    terminate_event.wait() # 等待直到要求退出
 
     logger.info("正在退出计划任务调度器。")
 

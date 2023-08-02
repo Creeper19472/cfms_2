@@ -37,11 +37,29 @@ hide_when_no_access = true
 show_login_fail_details = false
 
 [database]
-db_name = "general.db"
+
+# 使用的数据库类型，目前支持 sqlite3 与 mysql
+use_database = "sqlite3"
+
+# 如果使用 sqlite3, 指定其文件名
+sqlite3_db_name = "general.db"
+
+### 配置 MySQL
+mysql_host = ""
+mysql_port = 3306
+
+mysql_username = ""
+mysql_password = ""
+
+# 指定使用的数据库
+mysql_db_name = ""
 
 [cron]
 do_clean_job_interval = 600
 # 间隔多少秒执行过期文件的删除任务？
+
+do_clear_cache_job_interval = 60
+# 定期清理不再需要的传输临时文件所间隔的时间。单位为秒。
 
 [debug]
 debug = true
