@@ -1,0 +1,21 @@
+{
+    "policy_id": "auto_block",
+    "access_rules": {},
+    "external_access": {},
+    "content": {
+        "autoblock_invaild_requests": {
+            "enabled": true,
+            "allowed_attempts": 10,
+            "block_time": 473040000
+        },
+        "autoblock_login_retries": {
+            "enabled": true,
+            "permanently_block_after_retries": 50,
+            "temporily_block_after_retries": 5,
+            "temporily_block_time": 30,
+            "temporily_block_time_per_plus_time": 30,
+            "temporily_block_time_per_plus_max_time": 600
+        }
+    },
+    "__comments__": "该策略确定对异常行为的自动封禁行动。"
+}

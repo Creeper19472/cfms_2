@@ -1,0 +1,10 @@
+{
+    "policy_id": "group_settings",
+    "access_rules": {},
+    "external_access": {},
+    "content": {
+        "default_rights": {},
+        "default_enabled": 1,
+        "default_members": []
+    }
+}
