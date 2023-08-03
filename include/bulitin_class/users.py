@@ -37,7 +37,7 @@ class Users(object):
         if not self.ifExists():
             return
 
-        self.db_cursor.execute("SELECT rights, groups, properties, publickey from users where username = ?", (self.username,))
+        self.db_cursor.execute("SELECT `rights`, `groups`, `properties`, `publickey` from `users` where `username` = ?", (self.username,))
         result = self.db_cursor.fetchone()
 
         self.rights = set() # 重置
@@ -66,7 +66,7 @@ class Users(object):
 
         for per_group in self.groups:
 
-            self.db_cursor.execute("SELECT rights, enabled from groups where name = ?", (per_group, ))
+            self.db_cursor.execute("SELECT `rights`, `enabled` from `groups` where `name` = ?", (per_group, ))
             per_result = self.db_cursor.fetchone()
             if per_result[1]:
                 for i in (per_group_rights := json.loads(per_result[0])):
@@ -95,7 +95,7 @@ class Users(object):
         else:
             diff_properties = self.properties
 
-        self.db_cursor.execute("SELECT properties FROM users WHERE username = ?;", \
+        self.db_cursor.execute("SELECT `properties` FROM `users` WHERE `username` = ?;", \
                             (self.username,))
         query_properties =self.db_cursor.fetchone()[0]
 
@@ -105,7 +105,7 @@ class Users(object):
             if not i in query_properties or diff_properties[i] != query_properties[i]:
                 query_properties[i] = diff_properties[i]
 
-        self.db_cursor.execute("UPDATE users SET properties = ? WHERE username = ?", (json.dumps(diff_properties), self.username))
+        self.db_cursor.execute("UPDATE `users` SET `properties` = ? WHERE `username` = ?", (json.dumps(diff_properties), self.username))
         self.db_conn.commit()
          
 
@@ -115,7 +115,7 @@ class Users(object):
         # 可能注入的位点
         prelist = []
         prelist.append(self.username)
-        self.db_cursor.execute("SELECT count(username) from users where username = ?", tuple(prelist))
+        self.db_cursor.execute("SELECT count(`username`) from `users` where `username` = ?", tuple(prelist))
         result = self.db_cursor.fetchone()
         if result[0] == 1:
             return True
@@ -127,7 +127,7 @@ class Users(object):
     def ifMatchPassword(self, given):
         prelist = []
         prelist.append(self.username)
-        self.db_cursor.execute("SELECT hash, salt from users where username = ?", tuple(prelist))
+        self.db_cursor.execute("SELECT `hash`, `salt` from `users` where `username` = ?", tuple(prelist))
 
         hash, salt = self.db_cursor.fetchone()
         # 初始化sha256对象

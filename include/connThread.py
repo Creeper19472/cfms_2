@@ -29,6 +29,8 @@ from include.bulitin_class.policies import Policies
 from include.util.structurecheck import StructureValidater
 from include.util.convert import convertFile2PathID
 
+from include.database.abstracted import getDBConnection
+
 from typing import Iterable, Self
 
 
@@ -37,27 +39,26 @@ class PendingWriteFileError(Exception):
 
 
 class ConnThreads(threading.Thread):
-    def __init__(self, target, name, semaphore: threading.Semaphore, args=(), kwargs={}):
+    def __init__(
+        self, target, name, semaphore: threading.Semaphore, args=(), kwargs={}
+    ):
         super().__init__()
         self.target = target
         self.name = name  # 只能是这个变量名
         # 传给真正的处理类
         self.args = args
         self.kwargs = kwargs
-        
+
         self.semaphore = semaphore
 
     def run(self):
         with self.semaphore:
-        
             target_class = self.target(self.name, *self.args, **self.kwargs)
 
             try:
                 target_class.main()
             except ConnectionResetError:
-                target_class.log.logger.info(
-                    f"{self.name}: Connection reset"
-                )
+                target_class.log.logger.info(f"{self.name}: Connection reset")
                 sys.exit()
             except Exception as e:
                 e.add_note("看起来线程内部的运行出现了问题。将关闭到客户端的连接。")
@@ -102,9 +103,9 @@ class ConnHandler:
         self.this_time_token = None
         self.this_time_username = None
 
-        self.db_conn = sqlite3.connect(f"{self.root_abspath}/general.db")
-
         self.config = kwargs["toml_config"]  # 导入配置字典
+
+        self.db_conn = getDBConnection(self.config)  # 这仅开启主数据库的连接
 
         self.locale = self.config["general"]["locale"]
 
@@ -254,7 +255,9 @@ class ConnHandler:
                 self.__send(json.dumps({"msg": "ok", "code": 0}))  # 发送成功回答
         except:
             self.log.logger.info(f"{self.addr}: Handshake failed.")
-            self.log.logger.debug(f"{self.addr}: Error details for this handshake process:", exc_info=True)
+            self.log.logger.debug(
+                f"{self.addr}: Error details for this handshake process:", exc_info=True
+            )
             self.conn.close()
             sys.exit()
 
@@ -274,7 +277,9 @@ class ConnHandler:
                 self.log.logger.info(f"{self.addr}: Connection reset")
                 sys.exit()
             except TimeoutError:
-                self.log.logger.info(f"{self.addr}: Connection timed out. Disconnecting.")
+                self.log.logger.info(
+                    f"{self.addr}: Connection timed out. Disconnecting."
+                )
                 self.conn.close()
                 sys.exit()
             # print(f"recv: {recv}")
@@ -498,7 +503,8 @@ class ConnHandler:
         # 查询文件信息
 
         g_cur.execute(
-            "SELECT type , file_id FROM path_structures WHERE id = ?", (fake_path_id,)
+            "SELECT `type`, `file_id` FROM path_structures WHERE `id` = ?",
+            (fake_path_id,),
         )
         query_result = g_cur.fetchall()
 
@@ -515,7 +521,7 @@ class ConnHandler:
         # 查询 document_indexes 表
 
         g_cur.execute(
-            "SELECT abspath FROM document_indexes WHERE id = ?", (index_file_id,)
+            "SELECT `abspath` FROM document_indexes WHERE `id` = ?", (index_file_id,)
         )
 
         index_query_result = g_cur.fetchall()
@@ -534,8 +540,10 @@ class ConnHandler:
 
         # 删除表记录
 
-        g_cur.execute("DELETE from document_indexes where id = ?;", (index_file_id,))
-        g_cur.execute("DELETE from path_structures where id = ?;", (fake_path_id,))
+        g_cur.execute(
+            "DELETE from `document_indexes` where `id` = ?;", (index_file_id,)
+        )
+        g_cur.execute("DELETE from `path_structures` where `id` = ?;", (fake_path_id,))
 
         self.db_conn.commit()
 
@@ -568,7 +576,7 @@ class ConnHandler:
 
         # 遍历下级文件夹
         handle_cursor.execute(
-            'SELECT id FROM path_structures WHERE parent_id = ? AND type = "dir";',
+            'SELECT `id` FROM path_structures WHERE `parent_id` = ? AND `type` = "dir";',
             (dir_id,),
         )
 
@@ -582,7 +590,7 @@ class ConnHandler:
 
         # 获取本级列表
         handle_cursor.execute(
-            "SELECT id FROM path_structures WHERE parent_id = ?", (dir_id,)
+            "SELECT `id` FROM path_structures WHERE `parent_id` = ?", (dir_id,)
         )
         query_result = handle_cursor.fetchall()
 
@@ -592,14 +600,14 @@ class ConnHandler:
             else:
                 # 删除该目录的直系子级文件和目录
                 handle_cursor.execute(
-                    "UPDATE path_structures SET state = ? WHERE id = ?;",
+                    "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
                     (json.dumps(new_state), i[0]),
                 )
                 completed_list.append(i[0])
 
         if not failed_list:  # 仅当删除下级文件未出现错误时才删除目录
             handle_cursor.execute(
-                "UPDATE path_structures SET state = ? WHERE id = ?;",
+                "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
                 (json.dumps(new_state), dir_id),
             )
             completed_list.append(dir_id)
@@ -624,7 +632,7 @@ class ConnHandler:
 
         # 遍历下级文件夹
         handle_cursor.execute(
-            'SELECT id FROM path_structures WHERE parent_id = ? AND type = "dir";',
+            'SELECT `id` FROM path_structures WHERE `parent_id` = ? AND `type` = "dir";',
             (dir_id,),
         )
 
@@ -638,7 +646,7 @@ class ConnHandler:
 
         # 获取本级列表
         handle_cursor.execute(
-            "SELECT id FROM path_structures WHERE parent_id = ?", (dir_id,)
+            "SELECT `id` FROM path_structures WHERE `parent_id` = ?", (dir_id,)
         )
         query_result = handle_cursor.fetchall()
 
@@ -648,14 +656,14 @@ class ConnHandler:
             else:
                 # 恢复该目录的直系子级文件和目录
                 handle_cursor.execute(
-                    "UPDATE path_structures SET state = ? WHERE id = ?;",
+                    "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
                     (json.dumps(new_state), i[0]),
                 )
                 completed_list.append(i[0])
 
         # 无论是否全部恢复成功都恢复此目录
         handle_cursor.execute(
-            "UPDATE path_structures SET state = ? WHERE id = ?;",
+            "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
             (json.dumps(new_state), dir_id),
         )
         completed_list.append(dir_id)
@@ -668,7 +676,7 @@ class ConnHandler:
         g_cur = self.db_conn.cursor()
 
         g_cur.execute(
-            "SELECT type , file_id FROM path_structures WHERE id = ?", (path_id,)
+            "SELECT `type`, `file_id` FROM path_structures WHERE `id` = ?", (path_id,)
         )
 
         query_result = g_cur.fetchall()
@@ -691,7 +699,7 @@ class ConnHandler:
         del this_file_result, query_result  # 清除
 
         g_cur.execute(
-            "SELECT abspath FROM document_indexes WHERE id = ?", (index_file_id,)
+            "SELECT `abspath` FROM document_indexes WHERE `id` = ?", (index_file_id,)
         )
 
         query_result = g_cur.fetchall()
@@ -710,7 +718,7 @@ class ConnHandler:
             filesize = os.path.getsize(this_real_file_result[0])
             SYS_LOCKS["SYS_IOLOCK"].release()
             return filesize
-        else: # 如果超时
+        else:  # 如果超时
             return -1
 
     def filterPathProperties(self, properties: dict):
@@ -781,7 +789,7 @@ class ConnHandler:
 
         db_cur = self.db_conn.cursor()
         db_cur.execute(
-            "SELECT parent_id, access_rules, external_access, type FROM path_structures WHERE id = ?",
+            "SELECT `parent_id`, `access_rules`, `external_access`, `type` FROM path_structures WHERE `id` = ?",
             (id,),
         )
 
@@ -1043,7 +1051,6 @@ class ConnHandler:
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
 
-
         if not self._verifyAccess(
             user, "read", por_access_rules, por_external_access, True
         ):
@@ -1056,7 +1063,7 @@ class ConnHandler:
         handle_cursor = self.db_conn.cursor()
 
         handle_cursor.execute(
-            "SELECT id, name, type, properties, state FROM path_structures WHERE parent_id = ?",
+            "SELECT `id`, `name`, `type`, `properties`, `state` FROM path_structures WHERE `parent_id` = ?",
             ("",),
         )
         all_result = handle_cursor.fetchall()
@@ -1103,7 +1110,7 @@ class ConnHandler:
 
         handle_cursor = self.db_conn.cursor()
         handle_cursor.execute(
-            "SELECT content, access_rules, external_access FROM policies WHERE id = ?",
+            "SELECT `content`, `access_rules`, `external_access` FROM `policies` WHERE `id` = ?",
             (req_policy_id,),
         )
 
@@ -1260,7 +1267,8 @@ class ConnHandler:
 
         if target_directory_id:  # 如果不是根目录
             handle_cursor.execute(
-                "SELECT type FROM path_structures WHERE id = ?", (target_directory_id,)
+                "SELECT `type` FROM path_structures WHERE `id` = ?",
+                (target_directory_id,),
             )
 
             dir_query_result = handle_cursor.fetchall()
@@ -1319,13 +1327,13 @@ class ConnHandler:
         # 注册数据库条目
 
         handle_cursor.execute(
-            "INSERT INTO document_indexes (id, abspath) VALUES (?, ?)",
+            "INSERT INTO document_indexes (`id`, `abspath`) VALUES (?, ?)",
             (index_file_id, destination_path + "/" + real_filename),
         )
 
         handle_cursor.execute(
             "INSERT INTO path_structures \
-                              (id , name , owner , parent_id , type , file_id , access_rules, external_access, properties, state) \
+                              (`id` , `name` , `owner` , `parent_id` , `type` , `file_id` , `access_rules`, `external_access`, `properties`, `state`) \
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 target_file_path_id,
@@ -1398,8 +1406,8 @@ class ConnHandler:
         handle_cursor = self.db_conn.cursor()
 
         handle_cursor.execute(
-            "SELECT name, parent_id, type, file_id, access_rules, external_access, properties, state \
-                              FROM path_structures WHERE id = ?",
+            "SELECT `name`, `parent_id`, `type`, `file_id`, `access_rules`, `external_access`, `properties`, `state` \
+                              FROM path_structures WHERE `id` = ?",
             (file_id,),
         )
 
@@ -1582,7 +1590,7 @@ class ConnHandler:
                             return
 
                     handle_cursor.execute(
-                        "UPDATE path_structures SET name = ? WHERE id = ?;",
+                        "UPDATE path_structures SET `name` = ? WHERE `id` = ?;",
                         (new_filename, file_id),
                     )
 
@@ -1611,7 +1619,7 @@ class ConnHandler:
                     }
 
                     handle_cursor.execute(
-                        "UPDATE path_structures SET state = ? WHERE id = ?;",
+                        "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
                         (json.dumps(new_state), file_id),
                     )
 
@@ -1629,7 +1637,7 @@ class ConnHandler:
                     recovered_state = {"code": "ok", "expire_time": 0}
 
                     handle_cursor.execute(
-                        "UPDATE path_structures SET state = ? WHERE id = ?;",
+                        "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
                         (json.dumps(recovered_state), file_id),
                     )
                     self.db_conn.commit()
@@ -1653,7 +1661,7 @@ class ConnHandler:
                     handle_cursor = self.db_conn.cursor()
 
                     handle_cursor.execute(
-                        "SELECT type FROM path_structures WHERE id = ?",
+                        "SELECT `type` FROM path_structures WHERE `id` = ?",
                         (new_parent_id,),
                     )
 
@@ -1672,7 +1680,7 @@ class ConnHandler:
                     # 调取原目录
 
                     handle_cursor.execute(
-                        "SELECT parent_id FROM path_structures WHERE id = ?",
+                        "SELECT `parent_id` FROM path_structures WHERE `id` = ?",
                         (query_file_id,),
                     )
 
@@ -1691,7 +1699,7 @@ class ConnHandler:
                     # 执行操作
 
                     handle_cursor.execute(
-                        "UPDATE path_structures SET parent_id = ? WHERE id = ?;",
+                        "UPDATE path_structures SET `parent_id` = ? WHERE `id` = ?;",
                         (new_parent_id, query_file_id),
                     )
 
@@ -1717,7 +1725,7 @@ class ConnHandler:
                     handle_cursor = self.db_conn.cursor()
 
                     handle_cursor.execute(
-                        "SELECT type FROM path_structures WHERE id = ?", (new_id,)
+                        "SELECT `type` FROM path_structures WHERE `id` = ?", (new_id,)
                     )
 
                     result = handle_cursor.fetchall()
@@ -1729,7 +1737,7 @@ class ConnHandler:
                     # 执行操作
 
                     handle_cursor.execute(
-                        "UPDATE path_structures SET id = ? WHERE id = ?;",
+                        "UPDATE path_structures SET `id` = ? WHERE `id` = ?;",
                         (new_id, query_file_id),
                     )
 
@@ -1811,7 +1819,7 @@ class ConnHandler:
         )
 
         handle_cursor.execute(
-            "INSERT INTO users VALUES(?, ?, ?, ?, ?, ?, ?, ?)", insert_user
+            "INSERT INTO `users` VALUES(?, ?, ?, ?, ?, ?, ?, ?)", insert_user
         )
 
         self.db_conn.commit()
@@ -1842,7 +1850,7 @@ class ConnHandler:
 
         # 判断组是否存在
         handle_cursor.execute(
-            "SELECT count(name) from groups where name = ?", (new_group_name,)
+            "SELECT count(`name`) from `groups` where `name` = ?", (new_group_name,)
         )
         result = handle_cursor.fetchone()
 
@@ -1886,7 +1894,7 @@ class ConnHandler:
         group_id = secrets.token_hex(16)
 
         handle_cursor.execute(
-            "INSERT INTO groups VALUES(?, ?, ?, ?, ?)",  # 插入新的组
+            "INSERT INTO `groups` VALUES(?, ?, ?, ?, ?)",  # 插入新的组
             (
                 group_id,
                 new_group_name,
@@ -1897,7 +1905,7 @@ class ConnHandler:
         )
 
         for i in new_group_members:
-            handle_cursor.execute("SELECT groups FROM users WHERE username = ?", (i,))
+            handle_cursor.execute("SELECT `groups` FROM `users` WHERE `username` = ?", (i,))
             query_result = handle_cursor.fetchone()
             if not query_result:
                 errors.append((i, "NOT_FOUND"))
@@ -1908,7 +1916,7 @@ class ConnHandler:
             new_groups[new_group_name] = {"expire": 0}
 
             handle_cursor.execute(
-                "UPDATE users SET groups = ? WHERE username = ? ",
+                "UPDATE `users` SET `groups` = ? WHERE `username` = ? ",
                 (json.dumps(new_groups), i),
             )
 
@@ -1998,8 +2006,8 @@ class ConnHandler:
         handle_cursor = self.db_conn.cursor()
 
         handle_cursor.execute(
-            'SELECT name, parent_id, access_rules, external_access, properties, state \
-                              FROM path_structures WHERE id = ? AND type = "dir";',
+            'SELECT `name`, `parent_id`, `access_rules`, `external_access`, `properties`, `state` \
+                              FROM path_structures WHERE `id` = ? AND `type` = "dir";',
             (dir_id,),
         )
 
@@ -2018,8 +2026,8 @@ class ConnHandler:
                 if not view_deleted:
                     self.__send(json.dumps(self.RES_NOT_FOUND))
                     return
-                
-        parent_id = result[0][1] # 文件夹的父级目录 ID
+
+        parent_id = result[0][1]  # 文件夹的父级目录 ID
 
         if action in [
             "list",
@@ -2037,9 +2045,8 @@ class ConnHandler:
                 return
 
             if action == "list":
-
                 handle_cursor.execute(
-                    "SELECT id, name, type, properties, state FROM path_structures WHERE parent_id = ?",
+                    "SELECT `id`, `name`, `type`, `properties`, `state` FROM path_structures WHERE `parent_id` = ?",
                     (dir_id,),
                 )
                 all_result = handle_cursor.fetchall()
@@ -2049,7 +2056,7 @@ class ConnHandler:
                 for i in all_result:
                     this_object_state = json.loads(i[4])
 
-                    if this_object_state["code"] == "deleted": # 如果已被删除
+                    if this_object_state["code"] == "deleted":  # 如果已被删除
                         if not view_deleted:
                             continue
 
@@ -2081,7 +2088,7 @@ class ConnHandler:
                 if parent_id:
                     if self.verifyUserAccess(parent_id, "read", user):  # 检查是否有权访问父级目录
                         handle_cursor.execute(
-                            "SELECT name, type, properties FROM path_structures WHERE id = ?",
+                            "SELECT `name`, `type`, `properties` FROM path_structures WHERE `id` = ?",
                             (parent_id,),
                         )
                         parent_result = handle_cursor.fetchone()
@@ -2179,7 +2186,7 @@ class ConnHandler:
                         return
 
                 handle_cursor.execute(
-                    "UPDATE path_structures SET name = ? WHERE id = ?;",
+                    "UPDATE path_structures SET `name` = ? WHERE `id` = ?;",
                     (new_dirname, dir_id),
                 )
 
@@ -2225,7 +2232,7 @@ class ConnHandler:
                 handle_cursor = self.db_conn.cursor()
 
                 handle_cursor.execute(
-                    "SELECT type FROM path_structures WHERE id = ?", (new_parent_id,)
+                    "SELECT `type` FROM path_structures WHERE `id` = ?", (new_parent_id,)
                 )
 
                 query_result = handle_cursor.fetchall()
@@ -2243,7 +2250,7 @@ class ConnHandler:
                 # 调取原目录
 
                 handle_cursor.execute(
-                    "SELECT parent_id FROM path_structures WHERE id = ?", (dir_id,)
+                    "SELECT `parent_id` FROM path_structures WHERE `id` = ?", (dir_id,)
                 )
 
                 old_parent_result = handle_cursor.fetchone()
@@ -2261,7 +2268,7 @@ class ConnHandler:
                 # 执行操作
 
                 handle_cursor.execute(
-                    "UPDATE path_structures SET parent_id = ? WHERE id = ?;",
+                    "UPDATE path_structures SET `parent_id` = ? WHERE `id` = ?;",
                     (new_parent_id, dir_id),
                 )
                 # 不需要对下级文件做其他操作
@@ -2292,7 +2299,7 @@ class ConnHandler:
                 handle_cursor = self.db_conn.cursor()
 
                 handle_cursor.execute(
-                    "SELECT type FROM path_structures WHERE id = ?", (new_id,)
+                    "SELECT `type` FROM path_structures WHERE `id` = ?", (new_id,)
                 )
 
                 result = handle_cursor.fetchall()
@@ -2304,7 +2311,7 @@ class ConnHandler:
                 # 执行操作
 
                 handle_cursor.execute(
-                    "UPDATE path_structures SET id = ? WHERE id = ?;", (new_id, dir_id)
+                    "UPDATE path_structures SET `id` = ? WHERE `id` = ?;", (new_id, dir_id)
                 )
 
                 self.db_conn.commit()
@@ -2342,7 +2349,7 @@ class ConnHandler:
         handle_cursor = self.db_conn.cursor()
 
         handle_cursor.execute(
-            "SELECT * FROM path_structures WHERE id = ?", (target_id,)
+            "SELECT 1 FROM path_structures WHERE `id` = ?", (target_id,)
         )
 
         query_result = handle_cursor.fetchall()
@@ -2363,7 +2370,7 @@ class ConnHandler:
 
         if target_parent_id:  # 如果不是根目录
             handle_cursor.execute(
-                "SELECT type FROM path_structures WHERE id = ?", (target_parent_id,)
+                "SELECT `type` FROM path_structures WHERE `id` = ?", (target_parent_id,)
             )
 
             dir_query_result = handle_cursor.fetchall()
@@ -2409,7 +2416,7 @@ class ConnHandler:
 
         handle_cursor.execute(
             "INSERT INTO path_structures \
-                              (id , name , owner , parent_id , type , file_id , access_rules, external_access, properties, state) \
+                              (`id` , `name`, `owner` , `parent_id` , `type` , `file_id` , `access_rules`, `external_access`, `properties`, `state`) \
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 target_id,
@@ -2521,7 +2528,7 @@ class ConnHandler:
 
                 # 删除用户
                 handle_cursor.execute(
-                    "DELETE from users WHERE username = ?;", (dest_user.username,)
+                    "DELETE from `users` WHERE `username` = ?;", (dest_user.username,)
                 )
                 self.db_conn.commit()
 
@@ -2541,7 +2548,7 @@ class ConnHandler:
                     return
 
                 handle_cursor.execute(
-                    "UPDATE users SET publickey = ? WHERE username = ?",
+                    "UPDATE `users` SET `publickey` = ? WHERE `username` = ?",
                     (new_publickey, dest_user.username),
                 )
                 self.db_conn.commit()
@@ -2590,7 +2597,7 @@ class ConnHandler:
                 salted_pwd = __second_obj.hexdigest()
 
                 handle_cursor.execute(
-                    "UPDATE users SET hash = ?, salt = ? WHERE username = ?",
+                    "UPDATE `users` SET `hash` = ?, `salt` = ? WHERE `username` = ?",
                     (salted_pwd, salt, dest_user.username),
                 )
 
@@ -2620,7 +2627,7 @@ class ConnHandler:
                     return
 
                 handle_cursor.execute(
-                    "UPDATE users SET groups = ? WHERE username = ?",
+                    "UPDATE `users` SET `groups` = ? WHERE `username` = ?",
                     (json.dumps(new_groups), dest_user.username),
                 )
 
@@ -2644,7 +2651,7 @@ class ConnHandler:
                     return
 
                 handle_cursor.execute(
-                    "UPDATE users SET rights = ? WHERE username = ?",
+                    "UPDATE `users` SET `rights` = ? WHERE `username` = ?",
                     (json.dumps(new_rights), dest_user.username),
                 )
 

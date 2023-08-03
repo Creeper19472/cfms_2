@@ -11,7 +11,7 @@ class Policies(object):
         self.conn = sql_object
         self.cursor = self.conn.cursor()
 
-        self.cursor.execute("SELECT content, access_rules, external_access FROM policies WHERE id = ?", (self.policy_id,))
+        self.cursor.execute("SELECT `content`, `access_rules`, `external_access` FROM `policies` WHERE `id` = ?", (self.policy_id,))
 
         # 检查是否有重名
         fetched = self.cursor.fetchall()
@@ -36,6 +36,7 @@ class Policies(object):
         return item in self.content
     
     def save(self) -> None:
-        self.cursor.execute("UPDATE policies SET content = ?, access_rules = ?, external_access = ? WHERE id = ?;", \
+        self.cursor.execute("UPDATE policies SET `content` = ?, `access_rules` = ?, `external_access` = ? WHERE `id` = ?;", \
                             (self.policy_id, self.access_rules, self.external_access))
+        self.conn.commit()
         return

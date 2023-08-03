@@ -9,6 +9,7 @@ import logging
 import warnings
 import os
 from include.logtool import getCustomLogger
+from include.database.abstracted import getDBConnection
 
 def _permanentlyDeleteFile(fake_path_id, db_conn):
     g_cur = db_conn.cursor()
@@ -16,7 +17,7 @@ def _permanentlyDeleteFile(fake_path_id, db_conn):
     # 查询文件信息
 
     g_cur.execute(
-        "SELECT type , file_id FROM path_structures WHERE id = ?", (fake_path_id,)
+        "SELECT `type`, `file_id` FROM path_structures WHERE `id` = ?", (fake_path_id,)
     )
     query_result = g_cur.fetchall()
 
@@ -81,7 +82,7 @@ def _permanentlyDeleteDir(path_id, db_conn): # 这将导致其下所有文件被
     # 查询文件信息
 
     g_cur.execute(
-        "SELECT type , id FROM path_structures WHERE parent_id = ?", (path_id,)
+        "SELECT `type`, `id` FROM path_structures WHERE `parent_id` = ?", (path_id,)
     )
 
     query_result = g_cur.fetchall()
@@ -104,10 +105,10 @@ def _permanentlyDeleteDir(path_id, db_conn): # 这将导致其下所有文件被
 
 def task_clearExpiredFile():
     
-    general_db = sqlite3.connect(f"{ROOT_ABSPATH}/general.db")          
+    general_db = getDBConnection(SYS_CONFIG)      
     g_cur = general_db.cursor()
 
-    g_cur.execute("SELECT id, state, type FROM path_structures where state like '%\"deleted\"%';")
+    g_cur.execute("SELECT `id`, `state`, `type` FROM path_structures where `state` like '%\"deleted\"%';")
     query_result = g_cur.fetchall()
 
     count = 0
@@ -193,9 +194,10 @@ def main(root_abspath, terminate_event: threading.Event, logfile: str = "cron.lo
 
     # 读取配置文件
     with open(f"{ROOT_ABSPATH}/config.toml", "rb") as f:
-        config = tomllib.load(f)
+        global SYS_CONFIG
+        SYS_CONFIG = tomllib.load(f)
     
-    do_clean_job_interval = config["cron"]["do_clean_job_interval"]
+    do_clean_job_interval = SYS_CONFIG["cron"]["do_clean_job_interval"]
 
     if do_clean_job_interval:
 
@@ -208,7 +210,7 @@ def main(root_abspath, terminate_event: threading.Event, logfile: str = "cron.lo
         warnings.warn("您确定设置是正确的吗? do_clean_job_interval 看起来被设置为\
                       空。请使用不为零的正数来设置其时间。", category=RuntimeWarning)
         
-    do_clear_cache_job_interval = config["cron"]["do_clear_cache_job_interval"]
+    do_clear_cache_job_interval = SYS_CONFIG["cron"]["do_clear_cache_job_interval"]
 
     if do_clear_cache_job_interval:
         scheduler.add_job(task_clearFTPCache, 'interval', seconds=do_clear_cache_job_interval)

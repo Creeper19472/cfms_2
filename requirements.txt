@@ -17,4 +17,4 @@ deepdiff
 
 APScheduler
 
-pymysql
+mysql-connector-python # 8.0 support

@@ -24,8 +24,11 @@ from modules.pyftpdlib.handlers import TLS_FTPHandler
 
 from modules.pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 
+from include.database.abstracted import getDBConnection
+
 import logging
 
+import tomllib
 import re
 
 
@@ -126,7 +129,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
     def validate_authentication(self, username, password, handler):
 
-        g_db = sqlite3.connect(f"{ROOT_ABSPATH}/general.db")
+        g_db = getDBConnection(SYS_CONFIG)
         g_cursor = g_db.cursor()
 
         fq_db = sqlite3.connect(f"{ROOT_ABSPATH}/content/fqueue.db")
@@ -188,7 +191,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
         # print("add_user triggered")
         
         ### 初始化用户文件夹
-        g_db = sqlite3.connect(f"{ROOT_ABSPATH}/general.db")
+        g_db = getDBConnection(SYS_CONFIG)
         g_cursor = g_db.cursor()
 
         fq_db = sqlite3.connect(f"{ROOT_ABSPATH}/content/fqueue.db")
@@ -220,7 +223,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
             file_id, fake_id = i[0], i[1]
 
             # 查询
-            g_cursor.execute("SELECT abspath FROM document_indexes WHERE id = ?", (file_id,))
+            g_cursor.execute("SELECT `abspath` FROM document_indexes WHERE `id` = ?", (file_id,))
             real_file_path = g_cursor.fetchone()[0]
 
             if real_file_path:
@@ -283,6 +286,10 @@ def main(root_abspath, shutdown_event: threading.Event, addr: tuple, locks: dict
 
     global SYS_LOCKS
     SYS_LOCKS = locks
+
+    global SYS_CONFIG
+    with open("./config.toml", "rb") as f:
+        SYS_CONFIG = tomllib.load(f)
 
     # sys.path.append(f"{ROOT_ABSPATH}/include/") # 增加导入位置
 
