@@ -3,7 +3,8 @@
     "access_rules": {},
     "external_access": {},
     "content": {
-        "deleteAfterMarked": 604800
+        "deleteAfterMarked": 604800,
+        "revDeleteAfterMarked": 604800
     },
     "__comments__": "此为回收与删除策略。"
 }

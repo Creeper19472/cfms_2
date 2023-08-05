@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "230803_alpha")
+CORE_VERSION = (1, 0, 0, "230805_alpha")
 READABLE_VERSION = (
     f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
 )
@@ -27,6 +27,10 @@ import string
 from include.database.abstracted import getDBConnection, AbstractedConnection
 
 
+# 开发模式开关
+DEBUG = False
+
+
 # 初始化 terminate_event
 terminate_event = threading.Event()
 
@@ -38,23 +42,14 @@ SYS_LOCKS = {"SYS_IOLOCK": SYS_IOLOCK}
 def dbInit(db_object: AbstractedConnection):
     cur = db_object.cursor()
     cur.execute(
-        "CREATE TABLE users (`username` TEXT, `hash` TEXT, `salt` TEXT, `nickname` TEXT, `rights` TEXT, `groups` TEXT, `properties` TEXT, `publickey` TEXT);"
+        "CREATE TABLE users (`username` VARCHAR(255) PRIMARY KEY, `hash` TEXT, `salt` TEXT, \
+            `nickname` TEXT, `rights` TEXT, `groups` TEXT, `properties` TEXT, `publickey` TEXT);"
     )
     """
     rights: 额外权限。接受列表输入。
     此栏包含的权限将附加于用户个人。
     groups: 用户组。
     """
-    # 初始化密码
-    # 获取由4位随机大小写字母、数字组成的salt值
-    # def create_salt(length = 4):
-    #     salt = ''
-    #     chars = string.printable # 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789'
-    #     len_chars = len(chars) - 1
-    #     for i in range(0, length):
-    #         # 每次从chars中随机取一位
-    #         salt += chars[random.randint(0, len_chars)]
-    #     return salt
 
     def create_sha256(pwd, salt):
         first = hashlib.sha256(pwd.encode()).hexdigest()
@@ -63,7 +58,12 @@ def dbInit(db_object: AbstractedConnection):
         return second_obj.hexdigest()
 
     # 原始密码
-    pwd = "123456"
+    if not DEBUG:
+        # admin_username = secrets.token_hex(8)
+        pwd = secrets.token_hex(8)  # 改用随机生成
+    else:
+        pwd = "123456"
+
     # 随机生成8位salt
     alphabet = string.ascii_letters + string.digits
     salt = "".join(secrets.choice(alphabet) for i in range(8))  # 安全化
@@ -121,7 +121,9 @@ def dbInit(db_object: AbstractedConnection):
     # 新建文档索引表
 
     # now document_indexes does not store external data
-    cur.execute("CREATE TABLE document_indexes(`id` TEXT, `abspath` TEXT)")
+    cur.execute(
+        "CREATE TABLE document_indexes(`id` VARCHAR(255) PRIMARY KEY, `abspath` TEXT)"
+    )
 
     # metadata = {
     # "require": ["read"],
@@ -136,9 +138,14 @@ def dbInit(db_object: AbstractedConnection):
     cur.executemany("INSERT INTO document_indexes VALUES(?, ?)", insert_doc)
 
     # 新建组定义表
-    cur.execute(
-        "CREATE TABLE `groups` (`id` TEXT, `name` TEXT, `enabled` INT, `rights` BLOB, `properties` BLOB)"
-    )
+    if isinstance(cur, sqlite3.Cursor):
+        cur.execute(
+            "CREATE TABLE `groups` (`id` INTEGER PRIMARY KEY, `name` TEXT, `enabled` INT, `rights` BLOB, `properties` BLOB)"
+        )
+    else:
+        cur.execute(
+            "CREATE TABLE `groups` (`id` INT(4) PRIMARY KEY AUTO_INCREMENT, `name` TEXT, `enabled` INT, `rights` BLOB, `properties` BLOB)"
+        )
 
     group_rights = {"read": {"expire": 0}}
 
@@ -162,16 +169,19 @@ def dbInit(db_object: AbstractedConnection):
     }
 
     insert_groups = (
-        ("0", "sysop", 1, json.dumps(sysop_group_rights), json.dumps({})),
-        ("1", "user", 1, json.dumps(group_rights), json.dumps({})),
+        ("sysop", 1, json.dumps(sysop_group_rights), json.dumps({})),
+        ("user", 1, json.dumps(group_rights), json.dumps({})),
     )
-    cur.executemany("INSERT INTO `groups` VALUES(?, ?, ?, ?, ?)", insert_groups)
+    cur.executemany(
+        "INSERT INTO `groups` (`name`, `enabled`, `rights`, `properties`) VALUES(?, ?, ?, ?)",
+        insert_groups,
+    )
 
     # 新建伪路径索引定义表
     cur.execute(
         "CREATE TABLE path_structures\
-                (`id` TEXT, `name` TEXT, `owner` TEXT, `parent_id` TEXT, `type` TEXT, `file_id` TEXT, \
-                `access_rules` BLOB, `external_access` BLOB, `properties` BLOB, `state` TEXT)"
+                (`id` VARCHAR(255) PRIMARY KEY, `name` TEXT, `owner` TEXT, `parent_id` TEXT, `type` TEXT, \
+                `revisions` TEXT, `access_rules` BLOB, `external_access` BLOB, `properties` BLOB, `state` TEXT)"
     )
     # file_id: 如果是文件就必须有；文件夹应该没有
 
@@ -212,6 +222,17 @@ def dbInit(db_object: AbstractedConnection):
 
     insert_doc_state = {"code": "ok", "expire_time": 0}
 
+    import uuid
+    insert_doc_revisions = {
+        uuid.uuid4().hex: {
+            "file_id": "0",
+            "state": {"code": "ok", "expire_time": 0},
+            "access_rules": {},
+            "external_access": {},
+            "time": time.time()
+        }
+    }
+
     insert_paths = (
         (
             "C00001",
@@ -219,7 +240,7 @@ def dbInit(db_object: AbstractedConnection):
             json.dumps((("user", "admin"),)),
             "dir01",
             "file",
-            "0",
+            json.dumps(insert_doc_revisions),
             json.dumps(insert_doc_access_rules),
             json.dumps(insert_doc_external_access),
             json.dumps({}),
@@ -231,7 +252,7 @@ def dbInit(db_object: AbstractedConnection):
             json.dumps((("user", "admin"),)),
             "",
             "dir",
-            "0",
+            None,
             json.dumps(insert_dir_access_rules),
             json.dumps(insert_doc_external_access),
             json.dumps({}),
@@ -243,15 +264,24 @@ def dbInit(db_object: AbstractedConnection):
     )
 
     # create config table(internal)
-    cur.execute("CREATE TABLE cfms_internal(`id` TEXT, `key` TEXT, `value` BLOB)")
+    if isinstance(cur, sqlite3.Cursor):
+        cur.execute(
+            "CREATE TABLE cfms_internal(`id` INTEGER PRIMARY KEY, `key` TEXT, `value` BLOB)"
+        )
+    else:
+        cur.execute(
+            "CREATE TABLE cfms_internal(`id` INT(4) PRIMARY KEY AUTO_INCREMENT, `key` TEXT, `value` BLOB)"
+        )
+
     cur.execute(
-        "INSERT INTO cfms_internal VALUES(?, ?, ?)", (0, "db_version", READABLE_VERSION)
+        "INSERT INTO cfms_internal (`key`, `value`) VALUES(?, ?)",
+        ("db_version", READABLE_VERSION),
     )
 
     # create policy table
     log.logger.debug("正在创建策略表。")
     cur.execute(
-        "CREATE TABLE `policies`(`id` TEXT, `content` TEXT, `access_rules` TEXT, `external_access` TEXT)"
+        "CREATE TABLE `policies`(`id` VARCHAR(255) PRIMARY KEY, `content` TEXT, `access_rules` TEXT, `external_access` TEXT)"
     )
 
     for dirpath, dirnames, filenames in os.walk(
@@ -283,7 +313,9 @@ def dbInit(db_object: AbstractedConnection):
 
     log.logger.debug("所有策略的导入全部完成。")
 
-    total_changes = db_object.total_changes if db_object.total_changes != -1 else "[Unavailable]"
+    total_changes = (
+        db_object.total_changes if db_object.total_changes != -1 else "[Unavailable]"
+    )
 
     log.logger.debug(f"正在提交，数据库修改量：{total_changes}")
     db_object.commit()
@@ -559,6 +591,8 @@ if __name__ == "__main__":
         sys.exit()
 
     if config["debug"]["debug"]:
+        DEBUG = True
+
         log.cshandler.setLevel(logging.DEBUG)
         log.logger.info("Debug mode enabled.")
     log.logger.debug(config)
@@ -596,16 +630,14 @@ if __name__ == "__main__":
     # m_cur.execute("CREATE TABLE IF NOT EXISTS movie(title, year, score)")
 
     if db_type == "sqlite3":
-        m_cur.execute(
-            "select count(name) from sqlite_schema where type='table' order by name;"
-        )
+        m_cur.execute("select 1 from sqlite_schema where type='table' order by name;")
     elif db_type == "mysql":
         _mysql_db_name = config["database"]["mysql_db_name"]
         m_cur.execute(
             "select 1 from information_schema.tables where table_schema = ? and table_name = 'cfms_internal';",
             (_mysql_db_name,),
         )
-    if not m_cur.fetchone():  # count 为0（False）时执行初始化
+    if not m_cur.fetchone():
         dbInit(maindb)
 
     maindb.close()
