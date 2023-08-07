@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "230805_alpha")
+CORE_VERSION = (1, 0, 0, "230807_alpha")
 READABLE_VERSION = (
     f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
 )
@@ -25,6 +25,8 @@ import string
 
 # from apscheduler.schedulers.background import BackgroundScheduler
 from include.database.abstracted import getDBConnection, AbstractedConnection
+
+import pluggy
 
 
 # 开发模式开关
@@ -166,6 +168,10 @@ def dbInit(db_object: AbstractedConnection):
         "edit_other_users": {},
         "set_usergroups": {},
         "set_userrights": {},
+    }
+
+    user_group_rights = {
+        "set_nickname": {}
     }
 
     insert_groups = (
@@ -607,6 +613,13 @@ if __name__ == "__main__":
         log.logger.fatal("您正在运行的 Python 版本低于本系统的最低要求。")
         log.logger.fatal("由于此原因，程序无法继续。")
         sys.exit()
+
+    # 优先载入插件
+    hook_spec = pluggy.HookspecMarker("cfms")
+    hook_impl = pluggy.HookimplMarker("cfms")
+
+    pm = pluggy.PluginManager("cfms")
+
 
     db_type = config["database"]["db_type"]
 
