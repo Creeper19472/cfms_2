@@ -5,6 +5,9 @@ from typing import Any, Optional, Type
 import mysql.connector
 from mysql.connector.cursor import MySQLCursor
 
+from dbutils.persistent_db import PersistentDB
+from mysql.connector.pooling import MySQLConnectionPool
+
 class AbstractedConnection(ABC):
     pass
 
@@ -68,30 +71,12 @@ class WrappedMySQLConnection():
 
 
 
-def getDBConnection(config):
-    db_config = config["database"]
 
-    use_db_type = db_config["db_type"]
+def getDBConnection(pool):
 
-    if use_db_type == "sqlite3":
-        sqlite3_db_name = db_config["sqlite3_db_name"]
-
-        return sqlite3.connect(sqlite3_db_name)
-
-    elif use_db_type == "mysql":
-        host, port = db_config["mysql_host"], db_config["mysql_port"]
-        username, passwd = db_config["mysql_username"], db_config["mysql_password"]
-
-        db_name = db_config["mysql_db_name"]
-
-        db = mysql.connector.connect(
-            host=host,
-            port=port,
-            user=username,
-            password=passwd,
-            database=db_name,
-            charset="utf8mb4",
-        )
-
-
-        return WrappedMySQLConnection(db)
+    if isinstance(pool, MySQLConnectionPool):    
+        new_connection = pool.get_connection()
+        return WrappedMySQLConnection(new_connection)
+    elif isinstance(pool, PersistentDB):
+        return pool.connection()
+    

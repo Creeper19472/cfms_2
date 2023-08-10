@@ -26,6 +26,9 @@ import string
 # from apscheduler.schedulers.background import BackgroundScheduler
 from include.database.abstracted import getDBConnection, AbstractedConnection
 
+from include.database.pool import getDBPool
+
+from dbutils.steady_db import SteadyDBCursor
 import pluggy
 
 
@@ -140,7 +143,8 @@ def dbInit(db_object: AbstractedConnection):
     cur.executemany("INSERT INTO document_indexes VALUES(?, ?)", insert_doc)
 
     # 新建组定义表
-    if isinstance(cur, sqlite3.Cursor):
+
+    if isinstance(cur, (sqlite3.Cursor, SteadyDBCursor)):
         cur.execute(
             "CREATE TABLE `groups` (`id` INTEGER PRIMARY KEY, `name` TEXT, `enabled` INT, `rights` BLOB, `properties` BLOB)"
         )
@@ -148,8 +152,6 @@ def dbInit(db_object: AbstractedConnection):
         cur.execute(
             "CREATE TABLE `groups` (`id` INT(4) PRIMARY KEY AUTO_INCREMENT, `name` TEXT, `enabled` INT, `rights` BLOB, `properties` BLOB)"
         )
-
-    group_rights = {"read": {"expire": 0}}
 
     sysop_group_rights = {
         "super_useravatar": {"expire": 0},
@@ -171,12 +173,13 @@ def dbInit(db_object: AbstractedConnection):
     }
 
     user_group_rights = {
-        "set_nickname": {}
+        "set_nickname": {},
+        "read": {"expire": 0}
     }
 
     insert_groups = (
         ("sysop", 1, json.dumps(sysop_group_rights), json.dumps({})),
-        ("user", 1, json.dumps(group_rights), json.dumps({})),
+        ("user", 1, json.dumps(user_group_rights), json.dumps({})),
     )
     cur.executemany(
         "INSERT INTO `groups` (`name`, `enabled`, `rights`, `properties`) VALUES(?, ?, ?, ?)",
@@ -270,7 +273,7 @@ def dbInit(db_object: AbstractedConnection):
     )
 
     # create config table(internal)
-    if isinstance(cur, sqlite3.Cursor):
+    if isinstance(cur, (sqlite3.Cursor, SteadyDBCursor)):
         cur.execute(
             "CREATE TABLE cfms_internal(`id` INTEGER PRIMARY KEY, `key` TEXT, `value` BLOB)"
         )
@@ -320,7 +323,7 @@ def dbInit(db_object: AbstractedConnection):
     log.logger.debug("所有策略的导入全部完成。")
 
     total_changes = (
-        db_object.total_changes if db_object.total_changes != -1 else "[Unavailable]"
+        db_object.total_changes if isinstance(db_object, sqlite3.Connection) else "[Unavailable]"
     )
 
     log.logger.debug(f"正在提交，数据库修改量：{total_changes}")
@@ -520,6 +523,7 @@ def mainloop(serverd):
                 "root_abspath": root_abspath,
                 "threading.terminate_event": terminate_event,
                 "sys_locks": SYS_LOCKS,
+                "db_pool": db_pool
             },
         )
         Thread.daemon = True
@@ -623,7 +627,9 @@ if __name__ == "__main__":
 
     db_type = config["database"]["db_type"]
 
-    maindb = getDBConnection(config)
+    db_pool = getDBPool(config)
+    maindb = getDBConnection(db_pool)
+    
     if db_type == "mysql":
         m_cur = maindb.cursor(prepared=True)
     else:
@@ -701,6 +707,7 @@ if __name__ == "__main__":
             terminate_event,
             (config["connect"]["ipv4_addr"], config["connect"]["ftp_port"]),
             SYS_LOCKS,
+            db_pool
         ),
         name="FTPServerThread",
     )
@@ -710,7 +717,7 @@ if __name__ == "__main__":
     log.logger.info("正在注册计划任务...")
     SchedulerThread = threading.Thread(
         target=taskScheduler.main,
-        args=(root_abspath, terminate_event),
+        args=(root_abspath, terminate_event, db_pool),
         name="SchedulerThread",
     )
     SchedulerThread.start()

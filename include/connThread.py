@@ -31,6 +31,9 @@ from include.util.convert import convertFile2PathID
 
 from include.database.abstracted import getDBConnection
 
+from dbutils.persistent_db import PersistentDB
+from mysql.connector.pooling import MySQLConnectionPool
+
 from typing import Iterable, Self
 
 import uuid
@@ -107,7 +110,10 @@ class ConnHandler:
 
         self.config = kwargs["toml_config"]  # 导入配置字典
 
-        self.db_conn = getDBConnection(self.config)  # 这仅开启主数据库的连接
+        # 获取连接池
+        self.db_pool: MySQLConnectionPool | PersistentDB = kwargs["db_pool"]
+
+        self.db_conn = getDBConnection(self.db_pool)  # 这仅开启主数据库的连接
 
         self.locale = self.config["general"]["locale"]
 
@@ -240,7 +246,8 @@ class ConnHandler:
     
     def _createFileIndex(self, new_index_id: str|None=None):
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         # 开始创建文件
 
@@ -268,14 +275,17 @@ class ConnHandler:
         )
 
         # handle_cursor.execute("COMMIT TRANSACTION;")
-        self.db_conn.commit()
+        handle_conn.commit()
         handle_cursor.close()
+        handle_conn.close()
+        
 
         return index_file_id
 
     def _getNewestRevisionID(self, path_id) -> str | None:
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         handle_cursor.execute("SELECT `revisions` FROM path_structures WHERE `id` = ?", (path_id,))
         query_result = handle_cursor.fetchall()
@@ -567,7 +577,8 @@ class ConnHandler:
         return True
 
     def permanentlyDeleteFile(self, fake_path_id):
-        g_cur = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        g_cur = handle_conn.cursor()
 
         # 查询文件信息
 
@@ -614,7 +625,8 @@ class ConnHandler:
         )
         g_cur.execute("DELETE from `path_structures` where `id` = ?;", (fake_path_id,))
 
-        self.db_conn.commit()
+        handle_conn.commit()
+        handle_conn.close()
 
         # 移除所有传输任务列表
 
@@ -634,7 +646,8 @@ class ConnHandler:
         return True
 
     def deleteDir(self, dir_id, user: Users, delete_after=0):
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         completed_list = []
         failed_list = []
@@ -683,14 +696,16 @@ class ConnHandler:
         else:
             failed_list.append(dir_id)
 
-        self.db_conn.commit()
+        handle_conn.commit()
+        handle_conn.close()
 
         return completed_list, failed_list
 
     def recoverDir(self, dir_id, user: Users):
         # 注意：前后两个函数都不对用户是否有该文件夹权限做判断，应在 handle 部分完成
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         completed_list = []
         failed_list = []
@@ -737,13 +752,15 @@ class ConnHandler:
         )
         completed_list.append(dir_id)
 
-        self.db_conn.commit()
+        handle_conn.commit()
+        handle_conn.close()
 
         return completed_list, failed_list
 
     def getFileSize(self, path_id, rev_id=None):
 
-        g_cur = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        g_cur = handle_conn.cursor()
 
         g_cur.execute(
             "SELECT `type`, `revisions` FROM path_structures WHERE `id` = ?", (path_id,)
@@ -869,7 +886,8 @@ class ConnHandler:
             f"verifyUserAccess(): 正在对 用户 {user.username} 访问 id: {id} 的请求 进行鉴权"
         )
 
-        db_cur = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        db_cur = handle_conn.cursor()
         db_cur.execute(
             "SELECT `parent_id`, `access_rules`, `external_access`, `type` FROM path_structures WHERE `id` = ?",
             (id,),
@@ -1145,7 +1163,8 @@ class ConnHandler:
         else:
             self.log.logger.debug("根目录鉴权成功")
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         handle_cursor.execute(
             "SELECT `id`, `name`, `type`, `properties`, `state` FROM path_structures WHERE `parent_id` = ?",
@@ -1193,7 +1212,8 @@ class ConnHandler:
 
         action = "read"  # "getPolicy"，所以目前 action 就是 read
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
         handle_cursor.execute(
             "SELECT `content`, `access_rules`, `external_access` FROM `policies` WHERE `id` = ?",
             (req_policy_id,),
@@ -1335,7 +1355,8 @@ class ConnHandler:
         else:
             target_file_path_id = secrets.token_hex(8)
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         handle_cursor.execute(
             "SELECT 1 FROM path_structures WHERE id = ?", (target_file_path_id,)
@@ -1460,8 +1481,9 @@ class ConnHandler:
         )
 
         # handle_cursor.execute("COMMIT TRANSACTION;")
-        self.db_conn.commit()
+        handle_conn.commit()
         handle_cursor.close()
+        handle_conn.close()
 
         # 创建任务
         task_id, task_token, t_filenames, expire_time = self.createFileTask(
@@ -1518,7 +1540,8 @@ class ConnHandler:
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         handle_cursor.execute(
             "SELECT `name`, `parent_id`, `type`, `revisions`, `access_rules`, `external_access`, `properties`, `state` \
@@ -1737,7 +1760,8 @@ class ConnHandler:
 
                 handle_cursor.execute("UPDATE path_structures SET `revisions` = ? WHERE `id` = ?; ", (json.dumps(_insert_revisions), file_id))
                 # handle_cursor.execute("COMMIT TRANSACTION;") # End transaction
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 ## 创建传输任务
 
@@ -1806,7 +1830,8 @@ class ConnHandler:
                     (new_filename, file_id),
                 )
 
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps({"code": 0, "msg": "success"}))
 
@@ -1835,7 +1860,8 @@ class ConnHandler:
                     (json.dumps(new_state), file_id),
                 )
 
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps(self.RES_OK))
 
@@ -1852,7 +1878,8 @@ class ConnHandler:
                     "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
                     (json.dumps(recovered_state), file_id),
                 )
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps(self.RES_OK))
 
@@ -1870,7 +1897,8 @@ class ConnHandler:
 
                 # 判断新目录是否存在
 
-                handle_cursor = self.db_conn.cursor()
+                handle_conn = getDBConnection(self.db_pool)
+                handle_cursor = handle_conn.cursor()
 
                 handle_cursor.execute(
                     "SELECT `type` FROM path_structures WHERE `id` = ?",
@@ -1915,7 +1943,8 @@ class ConnHandler:
                     (new_parent_id, file_id),
                 )
 
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps(self.RES_OK))
 
@@ -1934,7 +1963,8 @@ class ConnHandler:
 
                 # 判断新 ID 是否被使用
 
-                handle_cursor = self.db_conn.cursor()
+                handle_conn = getDBConnection(self.db_pool)
+                handle_cursor = handle_conn.cursor()
 
                 handle_cursor.execute(
                     "SELECT `type` FROM path_structures WHERE `id` = ?", (new_id,)
@@ -1953,7 +1983,8 @@ class ConnHandler:
                     (new_id, file_id),
                 )
 
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps(self.RES_OK))
 
@@ -1990,7 +2021,8 @@ class ConnHandler:
                 handle_cursor.execute("UPDATE path_structures SET `revisions` = ? WHERE `id` = ?;", (_revisions_now, file_id))
 
                 # handle_cursor.execute("COMMIT TRANSACTION;")
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps(self.RES_OK))
 
@@ -2021,7 +2053,8 @@ class ConnHandler:
                 handle_cursor.execute("UPDATE path_structures SET `revisions` = ? WHERE `id` = ?;", (_revisions_now, file_id))
 
                 # handle_cursor.execute("COMMIT TRANSACTION;")
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps(self.RES_OK))
 
@@ -2031,8 +2064,9 @@ class ConnHandler:
             self.log.logger.debug("请求的操作不存在。")
             return
 
-        self.db_conn.commit()  # 统一 commit
+        handle_conn.commit()  # 统一 commit
         handle_cursor.close()
+        handle_conn.close()
 
     @userOperationAuthWrapper
     def handle_createUser(self, loaded_recv, user: Users):
@@ -2088,7 +2122,8 @@ class ConnHandler:
         if new_usr_rights == None:
             new_usr_rights = auth_policy["default_new_user_rights"]
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         # 随机生成8位salt
         alphabet = string.ascii_letters + string.digits
@@ -2115,7 +2150,8 @@ class ConnHandler:
             "INSERT INTO `users` VALUES(?, ?, ?, ?, ?, ?, ?, ?)", insert_user
         )
 
-        self.db_conn.commit()
+        handle_conn.commit()
+        handle_conn.close()
 
         self.__send(json.dumps(self.RES_OK))
 
@@ -2146,7 +2182,8 @@ class ConnHandler:
             self.__send(json.dumps(self.RES_ACCESS_DENIED))
             return
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         # 判断组是否存在
         handle_cursor.execute(
@@ -2186,7 +2223,8 @@ class ConnHandler:
 
         # 开始处理
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         errors = []
 
@@ -2216,7 +2254,8 @@ class ConnHandler:
                 (json.dumps(new_groups), i),
             )
 
-        self.db_conn.commit()
+        handle_conn.commit()
+        handle_conn.close()
 
         self.__send(json.dumps(self.RES_OK))
 
@@ -2299,7 +2338,8 @@ class ConnHandler:
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         handle_cursor.execute(
             'SELECT `name`, `parent_id`, `access_rules`, `external_access`, `properties`, `state` \
@@ -2486,7 +2526,8 @@ class ConnHandler:
                     (new_dirname, dir_id),
                 )
 
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps({"code": 0, "msg": "success"}))
 
@@ -2525,7 +2566,8 @@ class ConnHandler:
 
                 # 判断新目录是否存在
 
-                handle_cursor = self.db_conn.cursor()
+                handle_conn = getDBConnection(self.db_pool)
+                handle_cursor = handle_conn.cursor()
 
                 handle_cursor.execute(
                     "SELECT `type` FROM path_structures WHERE `id` = ?", (new_parent_id,)
@@ -2569,7 +2611,8 @@ class ConnHandler:
                 )
                 # 不需要对下级文件做其他操作
 
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps(self.RES_OK))
 
@@ -2592,7 +2635,8 @@ class ConnHandler:
 
                 # 判断新 ID 是否被使用
 
-                handle_cursor = self.db_conn.cursor()
+                handle_conn = getDBConnection(self.db_pool)
+                handle_cursor = handle_conn.cursor()
 
                 handle_cursor.execute(
                     "SELECT `type` FROM path_structures WHERE `id` = ?", (new_id,)
@@ -2610,7 +2654,8 @@ class ConnHandler:
                     "UPDATE path_structures SET `id` = ? WHERE `id` = ?;", (new_id, dir_id)
                 )
 
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps(self.RES_OK))
 
@@ -2649,7 +2694,8 @@ class ConnHandler:
         else:
             target_id = secrets.token_hex(16)
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         handle_cursor.execute(
             "SELECT 1 FROM path_structures WHERE `id` = ?", (target_id,)
@@ -2720,7 +2766,7 @@ class ConnHandler:
         handle_cursor.execute(
             "INSERT INTO path_structures \
                               (`id` , `name`, `owner` , `parent_id` , `type` , `revisions` , `access_rules`, `external_access`, `properties`, `state`) \
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
             (
                 target_id,
                 new_dirname,
@@ -2735,8 +2781,9 @@ class ConnHandler:
             ),
         )
 
-        self.db_conn.commit()
+        handle_conn.commit()
         handle_cursor.close()
+        handle_conn.close()
 
         self.__send(
             json.dumps(
@@ -2758,7 +2805,8 @@ class ConnHandler:
     @userOperationAuthWrapper
     def handle_operateUser(self, loaded_recv, user: Users):
 
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         if "data" not in loaded_recv:
             self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
@@ -2811,7 +2859,8 @@ class ConnHandler:
                 #     pass
 
                 handle_cursor.execute("UPDATE `users` SET `nickname` = ? WHERE `username` = ?", (dest_user.username,))
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps(self.RES_OK))
                 return
@@ -2843,7 +2892,8 @@ class ConnHandler:
                 handle_cursor.execute(
                     "DELETE from `users` WHERE `username` = ?;", (dest_user.username,)
                 )
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dump(self.RES_OK))
                 return
@@ -2864,7 +2914,8 @@ class ConnHandler:
                     "UPDATE `users` SET `publickey` = ? WHERE `username` = ?",
                     (new_publickey, dest_user.username),
                 )
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps(self.RES_OK))
                 return
@@ -2914,7 +2965,8 @@ class ConnHandler:
                     (salted_pwd, salt, dest_user.username),
                 )
 
-                self.db_conn.commit()
+                handle_conn.commit()
+                handle_conn.close()
 
                 self.__send(json.dumps(self.RES_OK))
 
@@ -3012,7 +3064,8 @@ class ConnHandler:
             }))
             return
         
-        handle_cursor = self.db_conn.cursor()
+        handle_conn = getDBConnection(self.db_pool)
+        handle_cursor = handle_conn.cursor()
 
         handle_cursor.execute("SELECT `type`, `revisions` FROM path_structures WHERE `id` = ?", (file_id,))
         query_result = handle_cursor.fetchone()
