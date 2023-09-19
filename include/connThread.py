@@ -311,6 +311,19 @@ class ConnHandler:
 
         return newest_revision[0] if newest_revision else None # 指定
 
+    def _hasFileRecord(self, file_id): # path_structures
+        self.db_cursor.execute("SELECT name FROM path_structures WHERE id = ?", (file_id,))
+        _result = self.db_cursor.fetchall()
+
+        _len = len(_result)
+
+        if _len == 1:
+            return _result[0][0]
+        elif _len == 0 :
+            return False
+        else:
+            raise RuntimeError("Wrong result length")
+
 
     def main(self):
         conn = self.conn  # 设置别名
@@ -889,7 +902,12 @@ class ConnHandler:
 
         result = db_cur.fetchall()
 
-        assert len(result) == 1
+        # assert len(result) == 1
+        if _:=len(result) != 1:
+            if _ == 0 :
+                raise FileNotFoundError
+            else:
+                raise RuntimeError("Expected less than 2 results, got more")
 
         access_rules = json.loads(result[0][1])
         external_access = json.loads(result[0][2])
@@ -2994,6 +3012,12 @@ class ConnHandler:
             self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
         
+        # 判断文件是否存在
+        if not self._hasFileRecord(file_id):
+            self.__send(json.dumps(self.RES_NOT_FOUND))
+            return
+
+
         if not self.verifyUserAccess(file_id, "read", user): # 目前仅要求用户具有 read 权限，未来可能细化
             self.__send(json.dumps(self.RES_ACCESS_DENIED))
             return
