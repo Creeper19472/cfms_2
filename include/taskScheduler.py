@@ -105,7 +105,7 @@ def _permanentlyDeleteDir(path_id, db_conn): # 这将导致其下所有文件被
 
 def task_clearExpiredFile():
     
-    general_db = getDBConnection(SYS_CONFIG)      
+    general_db = getDBConnection(DB_POOL)      
     g_cur = general_db.cursor()
 
     g_cur.execute("SELECT `id`, `state`, `type` FROM path_structures where `state` like '%\"deleted\"%';")
@@ -172,13 +172,16 @@ def task_clearFTPCache():
     if count:
         logger.info(f"清理了传输临时文件，处理了 {count} 个项目")
 
-def main(root_abspath, terminate_event: threading.Event, logfile: str = "cron.log"):
+def main(root_abspath, terminate_event: threading.Event, pool, logfile: str = "cron.log"):
 
     global ROOT_ABSPATH
     ROOT_ABSPATH = root_abspath
 
     global logger
     logger = getCustomLogger("main.cron", filepath="./content/logs/cron.log")
+
+    global DB_POOL
+    DB_POOL = pool
 
     aps_logger = logging.getLogger("apscheduler")
     aps_logger.setLevel(logging.DEBUG)

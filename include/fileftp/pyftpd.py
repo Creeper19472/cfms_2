@@ -4,6 +4,7 @@ import threading
 import time
 
 import sys
+from include.database.pool import getDBPool
 from include.logtool import getCustomLogger
 sys.path.append("./include/") # relative hack
 
@@ -129,7 +130,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
     def validate_authentication(self, username, password, handler):
 
-        g_db = getDBConnection(SYS_CONFIG)
+        g_db = getDBConnection(DB_POOL)
         g_cursor = g_db.cursor()
 
         fq_db = sqlite3.connect(f"{ROOT_ABSPATH}/content/fqueue.db")
@@ -191,7 +192,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
         # print("add_user triggered")
         
         ### 初始化用户文件夹
-        g_db = getDBConnection(SYS_CONFIG)
+        g_db = getDBConnection(DB_POOL)
         g_cursor = g_db.cursor()
 
         fq_db = sqlite3.connect(f"{ROOT_ABSPATH}/content/fqueue.db")
@@ -280,7 +281,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
 
 
-def main(root_abspath, shutdown_event: threading.Event, addr: tuple, locks: dict):
+def main(root_abspath, shutdown_event: threading.Event, addr: tuple, locks: dict, db_pool):
     global ROOT_ABSPATH
     ROOT_ABSPATH = root_abspath
 
@@ -290,6 +291,9 @@ def main(root_abspath, shutdown_event: threading.Event, addr: tuple, locks: dict
     global SYS_CONFIG
     with open("./config.toml", "rb") as f:
         SYS_CONFIG = tomllib.load(f)
+
+    global DB_POOL
+    DB_POOL = db_pool
 
     # sys.path.append(f"{ROOT_ABSPATH}/include/") # 增加导入位置
 
