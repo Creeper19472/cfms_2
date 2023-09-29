@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "230807_alpha")
+CORE_VERSION = (1, 0, 0, "230929_alpha")
 READABLE_VERSION = (
     f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
 )
@@ -172,10 +172,7 @@ def dbInit(db_object: AbstractedConnection):
         "set_userrights": {},
     }
 
-    user_group_rights = {
-        "set_nickname": {},
-        "read": {"expire": 0}
-    }
+    user_group_rights = {"set_nickname": {}, "read": {"expire": 0}}
 
     insert_groups = (
         ("sysop", 1, json.dumps(sysop_group_rights), json.dumps({})),
@@ -232,13 +229,14 @@ def dbInit(db_object: AbstractedConnection):
     insert_doc_state = {"code": "ok", "expire_time": 0}
 
     import uuid
+
     insert_doc_revisions = {
         uuid.uuid4().hex: {
             "file_id": "0",
             "state": {"code": "ok", "expire_time": 0},
             "access_rules": {},
             "external_access": {},
-            "time": time.time()
+            "time": time.time(),
         }
     }
 
@@ -323,7 +321,9 @@ def dbInit(db_object: AbstractedConnection):
     log.logger.debug("所有策略的导入全部完成。")
 
     total_changes = (
-        db_object.total_changes if isinstance(db_object, sqlite3.Connection) else "[Unavailable]"
+        db_object.total_changes
+        if isinstance(db_object, sqlite3.Connection)
+        else "[Unavailable]"
     )
 
     log.logger.debug(f"正在提交，数据库修改量：{total_changes}")
@@ -523,7 +523,7 @@ def mainloop(serverd):
                 "root_abspath": root_abspath,
                 "threading.terminate_event": terminate_event,
                 "sys_locks": SYS_LOCKS,
-                "db_pool": db_pool
+                "db_pool": db_pool,
             },
         )
         Thread.daemon = True
@@ -624,12 +624,11 @@ if __name__ == "__main__":
 
     pm = pluggy.PluginManager("cfms")
 
-
     db_type = config["database"]["db_type"]
 
     db_pool = getDBPool(config)
     maindb = getDBConnection(db_pool)
-    
+
     if db_type == "mysql":
         m_cur = maindb.cursor(prepared=True)
     else:
@@ -707,7 +706,7 @@ if __name__ == "__main__":
             terminate_event,
             (config["connect"]["ipv4_addr"], config["connect"]["ftp_port"]),
             SYS_LOCKS,
-            db_pool
+            db_pool,
         ),
         name="FTPServerThread",
     )

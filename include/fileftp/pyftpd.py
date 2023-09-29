@@ -130,9 +130,6 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
     def validate_authentication(self, username, password, handler):
 
-        g_db = getDBConnection(DB_POOL)
-        g_cursor = g_db.cursor()
-
         fq_db = sqlite3.connect(f"{ROOT_ABSPATH}/content/fqueue.db")
         fq_cursor = fq_db.cursor()
 
@@ -193,7 +190,10 @@ class DummyMD5Authorizer(DummyAuthorizer):
         
         ### 初始化用户文件夹
         g_db = getDBConnection(DB_POOL)
-        g_cursor = g_db.cursor()
+        try:
+            g_cursor = g_db.cursor(prepared=True)
+        except:
+            g_cursor = g_db.cursor()
 
         fq_db = sqlite3.connect(f"{ROOT_ABSPATH}/content/fqueue.db")
         fq_cursor = fq_db.cursor()

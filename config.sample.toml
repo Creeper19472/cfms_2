@@ -54,6 +54,9 @@ mysql_password = ""
 # 指定使用的数据库
 mysql_db_name = ""
 
+# 允许的连接池连接数量。最大为32.
+pool_max_connections = 32
+
 [cron]
 do_clean_job_interval = 600
 # 间隔多少秒执行过期文件的删除任务？

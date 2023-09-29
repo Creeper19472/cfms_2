@@ -3,7 +3,7 @@ import sys, os
 
 os.chdir("cli/")
 
-for i in range(0,25):
+for i in range(0,5):
     time.sleep(0.05)
 
     print("starting %s" % i)

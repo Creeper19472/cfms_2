@@ -76,7 +76,8 @@ def getDBConnection(pool):
 
     if isinstance(pool, MySQLConnectionPool):    
         new_connection = pool.get_connection()
-        return WrappedMySQLConnection(new_connection)
+        return new_connection
+        # return WrappedMySQLConnection(new_connection)
     elif isinstance(pool, PersistentDB):
         return pool.connection()
     

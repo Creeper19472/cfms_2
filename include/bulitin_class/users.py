@@ -3,17 +3,22 @@
 import secrets
 import sqlite3
 import hashlib
+from typing import Union
 import jwt
 import time
 import json
 
+from mysql.connector.connection import MySQLConnection
+from mysql.connector.cursor import MySQLCursorPrepared
+
 from deepdiff import DeepDiff
 
 class Users(object):
-    def __init__(self, username, db_conn: sqlite3.Connection, autoload=True, **kwargs):
+    def __init__(self, username, db_conn: Union[sqlite3.Connection, MySQLConnection], \
+                 db_cursor: Union[sqlite3.Cursor, MySQLCursorPrepared], autoload=True, **kwargs):
         self.username = username
         self.db_conn = db_conn
-        self.db_cursor = db_conn.cursor()
+        self.db_cursor = db_cursor
         self.rights = set()
         self.groups = set()
         self.properties = {}
@@ -113,9 +118,7 @@ class Users(object):
 
     def ifExists(self):
         # 可能注入的位点
-        prelist = []
-        prelist.append(self.username)
-        self.db_cursor.execute("SELECT count(`username`) from `users` where `username` = ?", tuple(prelist))
+        self.db_cursor.execute("SELECT count(`username`) from `users` where `username` = ?", (self.username,))
         result = self.db_cursor.fetchone()
         if result[0] == 1:
             return True

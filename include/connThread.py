@@ -33,6 +33,7 @@ from include.database.abstracted import getDBConnection
 
 from dbutils.persistent_db import PersistentDB
 from mysql.connector.pooling import MySQLConnectionPool
+from mysql.connector.pooling import PooledMySQLConnection
 
 from typing import Iterable, Self
 
@@ -71,7 +72,9 @@ class ConnThreads(threading.Thread):
                     f"{self.name}: 看起来线程内部的运行出现了问题：", exc_info=True
                 )
                 target_class.conn.close()
-                sys.exit()
+
+            target_class.db_conn.close()
+            sys.exit()
 
 
 class ConnHandler:
@@ -116,7 +119,13 @@ class ConnHandler:
         self.db_conn = getDBConnection(self.db_pool)  # 这仅开启主数据库的连接
 
         # 获取单一游标对象，准备采取一线程一连接一游标的模式
-        self.db_cursor = self.db_conn.cursor()
+        # print(isinstance(self.db_conn, PooledMySQLConnection))
+        if isinstance(self.db_conn, PooledMySQLConnection):
+            self.db_cursor = self.db_conn._cnx.cursor(prepared=True)
+        else:
+            self.db_cursor = self.db_conn.cursor()
+
+        # print(self.db_cursor._connection)
 
         self.locale = self.config["general"]["locale"]
 
@@ -246,14 +255,15 @@ class ConnHandler:
         self.encrypted_connection = True  # 激活加密传输标识
 
         return True
-    
-    def _createFileIndex(self, new_index_id: str|None=None):
 
+    def _createFileIndex(self, new_index_id: str | None = None):
         handle_cursor = self.db_cursor
 
         # 开始创建文件
 
-        index_file_id = new_index_id if new_index_id else secrets.token_hex(64)  # 存储在 document_indexes 中
+        index_file_id = (
+            new_index_id if new_index_id else secrets.token_hex(64)
+        )  # 存储在 document_indexes 中
         real_filename = secrets.token_hex(16)
 
         today = datetime.date.today()
@@ -278,52 +288,55 @@ class ConnHandler:
 
         # handle_cursor.execute("COMMIT TRANSACTION;")
         self.db_conn.commit()
-        
 
         return index_file_id
 
     def _getNewestRevisionID(self, path_id) -> str | None:
-
         handle_cursor = self.db_cursor
 
-        handle_cursor.execute("SELECT `revisions` FROM path_structures WHERE `id` = ?", (path_id,))
+        handle_cursor.execute(
+            "SELECT `revisions` FROM path_structures WHERE `id` = ?", (path_id,)
+        )
         query_result = handle_cursor.fetchall()
 
-        if len(query_result) != 1: # 由于主键互异性，可知其代表不存在
+        if len(query_result) != 1:  # 由于主键互异性，可知其代表不存在
             raise ValueError("Specified ID does not exist")
             # 这可能代表一种情况：数据库在操作的间隙间发生了变动。
 
         # 查询文档下的所有历史版本
         query_revisions: dict = json.loads(query_result[0][0])
-            
-        newest_revision = () # by default
+
+        newest_revision = ()  # by default
 
         # 排序
-        sorted_revisions: list = sorted(query_revisions.items(), key = lambda i: i[1]['time'], reverse=True)
+        sorted_revisions: list = sorted(
+            query_revisions.items(), key=lambda i: i[1]["time"], reverse=True
+        )
 
         # 如果已经删除
-        for per_revision in sorted_revisions: # per_revision is a tuple
-            if per_revision[1]["state"]["code"] == "deleted": # 我们假定用户希望得到最新的版本是未被删除的
+        for per_revision in sorted_revisions:  # per_revision is a tuple
+            if per_revision[1]["state"]["code"] == "deleted":  # 我们假定用户希望得到最新的版本是未被删除的
                 continue
             # 指定 newest
             newest_revision = per_revision
             break
 
-        return newest_revision[0] if newest_revision else None # 指定
+        return newest_revision[0] if newest_revision else None  # 指定
 
-    def _hasFileRecord(self, file_id): # path_structures
-        self.db_cursor.execute("SELECT name FROM path_structures WHERE id = ?", (file_id,))
+    def _hasFileRecord(self, file_id):  # path_structures
+        self.db_cursor.execute(
+            "SELECT name FROM path_structures WHERE id = ?", (file_id,)
+        )
         _result = self.db_cursor.fetchall()
 
         _len = len(_result)
 
         if _len == 1:
             return _result[0][0]
-        elif _len == 0 :
+        elif _len == 0:
             return False
         else:
             raise RuntimeError("Wrong result length")
-
 
     def main(self):
         conn = self.conn  # 设置别名
@@ -586,14 +599,13 @@ class ConnHandler:
 
         return True
 
-    def permanentlyDeleteFile(self, fake_path_id):
-        handle_conn = getDBConnection(self.db_pool)
-        g_cur = handle_conn.cursor()
+    def permanentlyDeleteFile(self, fake_path_id):  # TODO #15 更新操作至适配 revision 的版本
+        g_cur = self.db_cursor
 
         # 查询文件信息
 
         g_cur.execute(
-            "SELECT `type`, `file_id` FROM path_structures WHERE `id` = ?",
+            "SELECT `type`, `revisions` FROM path_structures WHERE `id` = ?",
             (fake_path_id,),
         )
         query_result = g_cur.fetchall()
@@ -603,60 +615,73 @@ class ConnHandler:
         elif len(query_result) > 1:
             raise ValueError("在查询表 path_structures 时发现不止一条同路径 id 的记录")
 
-        got_type, index_file_id = query_result[0]
+        got_type, revisions = query_result[0]
+
+        revisions = json.loads(revisions)
 
         if got_type != "file":
             raise TypeError("删除的必须是一个文件")
 
-        # 查询 document_indexes 表
-
-        g_cur.execute(
-            "SELECT `abspath` FROM document_indexes WHERE `id` = ?", (index_file_id,)
-        )
-
-        index_query_result = g_cur.fetchall()
-
-        if len(index_query_result) == 0:
-            raise FileNotFoundError(
-                f"未发现在 path_structures 中所指定的文件 id '{index_file_id}' 的记录"
-            )
-        elif len(index_query_result) > 1:
-            raise ValueError("在查询表 document_indexes 时发现不止一条同 id 的记录")
-
-        file_abspath = index_query_result[0][0]
-
-        if not file_abspath:
-            raise ValueError("file_abspath 必须有值")
-
-        # 删除表记录
-
-        g_cur.execute(
-            "DELETE from `document_indexes` where `id` = ?;", (index_file_id,)
-        )
-        g_cur.execute("DELETE from `path_structures` where `id` = ?;", (fake_path_id,))
-
-        handle_conn.commit()
-        handle_conn.close()
-
-        # 移除所有传输任务列表
-
+        # 先初始化 fq_db
         fq_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
         fq_cur = fq_db.cursor()
 
-        fq_cur.execute(
-            "DELETE from ft_queue WHERE file_id = ? AND done = 0;", (index_file_id,)
-        )  #  AND done = 0
+        # 查询 document_indexes 表
+
+        for revision_id in revisions:
+            this_index_file_id = revisions[revision_id]["file_id"]
+
+            g_cur.execute(
+                "SELECT `abspath` FROM document_indexes WHERE `id` = ?",
+                (this_index_file_id,),
+            )
+
+            index_query_result = g_cur.fetchall()
+
+            if len(index_query_result) == 0:
+                raise FileNotFoundError(
+                    f"在处理 Rev ID: {revision_id} 的删除时，未发现在 path_structures 中所指定的文件 id '{this_index_file_id}' 的记录"
+                )
+            elif len(index_query_result) > 1:
+                raise ValueError(
+                    f"在处理 Rev ID: {revision_id} 的删除时，在查询表 document_indexes 时发现不止一条同 id 的记录"
+                )
+
+            file_abspath = index_query_result[0][0]
+
+            if not file_abspath:
+                raise ValueError("file_abspath 必须有值")
+
+            # 删除表记录
+
+            g_cur.execute(
+                "DELETE from `document_indexes` where `id` = ?;", (this_index_file_id,)
+            )
+            g_cur.execute(
+                "DELETE from `path_structures` where `id` = ?;", (fake_path_id,)
+            )
+
+            self.db_conn.commit()
+
+            # 移除所有传输任务列表
+
+            fq_db = sqlite3.connect(f"{self.root_abspath}/content/fqueue.db")
+            fq_cur = fq_db.cursor()
+
+            fq_cur.execute(
+                "DELETE from ft_queue WHERE file_id = ? AND done = 0;",
+                (this_index_file_id,),
+            )  #  AND done = 0
+
+            # 删除真实文件
+            os.remove(file_abspath)
+
         fq_db.commit()
         fq_db.close()
-
-        # 删除真实文件
-
-        os.remove(file_abspath)
 
         return True
 
     def deleteDir(self, dir_id, user: Users, delete_after=0):
-        
         handle_cursor = self.db_cursor
 
         completed_list = []
@@ -765,9 +790,7 @@ class ConnHandler:
         return completed_list, failed_list
 
     def getFileSize(self, path_id, rev_id=None):
-
-        handle_conn = getDBConnection(self.db_pool)
-        g_cur = handle_conn.cursor()
+        g_cur = self.db_cursor
 
         g_cur.execute(
             "SELECT `type`, `revisions` FROM path_structures WHERE `id` = ?", (path_id,)
@@ -787,17 +810,16 @@ class ConnHandler:
 
         if not rev_id:
             rev_id = self._getNewestRevisionID(path_id)
-            if not rev_id: # 如果自动获取了ID却仍然为空（代表没有满足条件的结果），则不计算大小
+            if not rev_id:  # 如果自动获取了ID却仍然为空（代表没有满足条件的结果），则不计算大小
                 return -1
 
         # index_file_id = this_file_result[1]
         got_revisions = json.loads(this_file_result[1])
-        
+
         if rev_id not in got_revisions:
             raise ValueError("Revision ID not found")
-        
-        this_rev_file_id = got_revisions[rev_id]["file_id"]
 
+        this_rev_file_id = got_revisions[rev_id]["file_id"]
 
         if not this_rev_file_id:
             raise RuntimeError("意料外的数据库记录")
@@ -818,7 +840,7 @@ class ConnHandler:
         this_real_file_result = query_result[0]
 
         # cleanup
-        g_cur.close()
+        # g_cur.close()
 
         if SYS_LOCKS["SYS_IOLOCK"].acquire(timeout=0.75):
             filesize = os.path.getsize(this_real_file_result[0])
@@ -844,7 +866,7 @@ class ConnHandler:
 
             # 验证 token
 
-            user = Users(self.this_time_username, self.db_conn)
+            user = Users(self.this_time_username, self.db_conn, self.db_cursor)
 
             # 读取 token_secret
             with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
@@ -870,7 +892,8 @@ class ConnHandler:
         用于逐级检查用户是否拥有访问权限，若发生任意无情况即返回 False
         """
 
-        por_policy = Policies("permission_on_rootdir", self.db_conn)
+        # print(self.db_cursor._connection)
+        por_policy = Policies("permission_on_rootdir", self.db_conn, self.db_cursor)
 
         if id == None:
             raise ValueError
@@ -893,8 +916,8 @@ class ConnHandler:
             f"verifyUserAccess(): 正在对 用户 {user.username} 访问 id: {id} 的请求 进行鉴权"
         )
 
-        handle_conn = getDBConnection(self.db_pool)
-        db_cur = handle_conn.cursor()
+        db_cur = self.db_cursor
+
         db_cur.execute(
             "SELECT `parent_id`, `access_rules`, `external_access`, `type` FROM path_structures WHERE `id` = ?",
             (id,),
@@ -903,8 +926,8 @@ class ConnHandler:
         result = db_cur.fetchall()
 
         # assert len(result) == 1
-        if _:=len(result) != 1:
-            if _ == 0 :
+        if _ := len(result) != 1:
+            if _ == 0:
                 raise FileNotFoundError
             else:
                 raise RuntimeError("Expected less than 2 results, got more")
@@ -1080,7 +1103,7 @@ class ConnHandler:
 
     def handle_login(self, req_username, req_password):
         # 初始化用户对象 User()
-        user = Users(req_username, self.db_conn)
+        user = Users(req_username, self.db_conn, self.db_cursor)
         if user.ifExists():
             if user.ifMatchPassword(req_password):  # actually hash
                 self.log.logger.info(f"{req_username} 密码正确，准予访问")
@@ -1107,7 +1130,7 @@ class ConnHandler:
             else:
                 self.log.logger.info(f"{req_username} 密码错误，拒绝访问")
 
-                user_auth_policy = Policies("user_auth", self.db_conn)
+                user_auth_policy = Policies("user_auth", self.db_conn, self.db_cursor)
                 sleep_for_fail = user_auth_policy["sleep_when_login_fail"]
 
                 if sleep_for_fail:
@@ -1126,7 +1149,7 @@ class ConnHandler:
             else:
                 fail_msg = "username or password incorrect"
 
-            user_auth_policy = Policies("user_auth", self.db_conn)
+            user_auth_policy = Policies("user_auth", self.db_conn, self.db_cursor)
             sleep_for_fail = user_auth_policy["sleep_when_login_fail"]
 
             if sleep_for_fail:
@@ -1139,7 +1162,7 @@ class ConnHandler:
         pass
 
     def handle_refreshToken(self, req_username, old_token):
-        user = Users(req_username, self.db_conn)  # 初始化用户对象
+        user = Users(req_username, self.db_conn, self.db_cursor)  # 初始化用户对象
         # 读取 token_secret
         with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
             token_secret = ts_file.read()
@@ -1153,7 +1176,7 @@ class ConnHandler:
 
     @userOperationAuthWrapper
     def handle_getRootDir(self, loaded_recv, user: Users):
-        por_policy = Policies("permission_on_rootdir", self.db_conn)
+        por_policy = Policies("permission_on_rootdir", self.db_conn, self.db_cursor)
 
         por_access_rules = por_policy["rules"]["access_rules"]
         por_external_access = por_policy["rules"]["external_access"]
@@ -1257,7 +1280,7 @@ class ConnHandler:
             self.__send(json.dumps({"code": -1, "msg": "needs a username"}))
             return
 
-        get_avatar_user = Users(avatar_username, self.db_conn)
+        get_avatar_user = Users(avatar_username, self.db_conn, self.db_cursor)
 
         if not get_avatar_user.ifExists():
             self.log.logger.debug(
@@ -1266,7 +1289,7 @@ class ConnHandler:
             self.__send(json.dumps({"code": 404, "msg": "not found"}))
             return
 
-        avatar_policy = Policies("avatars", self.db_conn)
+        avatar_policy = Policies("avatars", self.db_conn, self.db_cursor)
 
         ### TODO #9 增加用户权限对头像获取权限的支持 - done
 
@@ -1357,10 +1380,7 @@ class ConnHandler:
 
         if target_file_path_id:
             if len(target_file_path_id) > 64:
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "file id too long"
-                }))
+                self.__send(json.dumps({"code": -1, "msg": "file id too long"}))
                 return
         else:
             target_file_path_id = secrets.token_hex(8)
@@ -1416,7 +1436,7 @@ class ConnHandler:
                 return
 
         else:
-            por_policy = Policies("permission_on_rootdir", self.db_conn)
+            por_policy = Policies("permission_on_rootdir", self.db_conn, self.db_cursor)
 
             por_access_rules = por_policy["rules"]["access_rules"]
             por_external_access = por_policy["rules"]["external_access"]
@@ -1457,12 +1477,10 @@ class ConnHandler:
             "state": {"code": "ok", "expire_time": 0},
             "access_rules": {},
             "external_access": {},
-            "time": time.time()
+            "time": time.time(),
         }
 
-        initial_revisions = {
-            new_revision_id : new_revision_data
-        }
+        initial_revisions = {new_revision_id: new_revision_data}
 
         # handle_cursor.execute("BEGIN TRANSACTION;")
 
@@ -1533,7 +1551,6 @@ class ConnHandler:
 
         # 处理 revision_id
         specified_revision_id = loaded_recv["data"].get("revision_id", None)
-            
 
         if not file_id:
             self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
@@ -1562,7 +1579,7 @@ class ConnHandler:
         elif len(result) < 1:
             self.__send(json.dumps({"code": -1, "msg": "no such file"}))
             return
-        
+
         # 判断文档总体是否被删除
         if (file_state := json.loads(result[0][7]))["code"] == "deleted":
             # 如下，file_state 不一定是 file 的 state，但由于安全性原因只能先写这个判断
@@ -1574,10 +1591,9 @@ class ConnHandler:
         if result[0][2] != "file":
             self.__send(json.dumps({"code": -1, "msg": "not a file"}))
             return
-        
+
         # 获取请求的操作
         req_action = loaded_recv["data"]["action"]
-        
 
         # 首先判断该操作是否由文档所允许（但可能放在后面也行）
         if not self.verifyUserAccess(file_id, req_action, user, _subcall=False):
@@ -1585,57 +1601,60 @@ class ConnHandler:
             self.log.logger.debug("权限校验失败：无权在文档下执行所请求的操作")
             return
 
-
         # 查询文档下的所有历史版本
         query_revisions: dict = json.loads(result[0][3])
 
-        if not specified_revision_id: # 如果未指定 rev
-            
-            newest_revision = () # by default
+        if not specified_revision_id:  # 如果未指定 rev
+            newest_revision = ()  # by default
 
             # 排序
-            sorted_revisions: list = sorted(query_revisions.items(), key = lambda i: i[1]['time'], reverse=True)
+            sorted_revisions: list = sorted(
+                query_revisions.items(), key=lambda i: i[1]["time"], reverse=True
+            )
 
             # 如果已经删除
-            for per_revision in sorted_revisions: # per_revision is a tuple
-                if per_revision[1]["state"]["code"] == "deleted": # 我们假定用户希望得到最新的版本是未被删除的
+            for per_revision in sorted_revisions:  # per_revision is a tuple
+                if (
+                    per_revision[1]["state"]["code"] == "deleted"
+                ):  # 我们假定用户希望得到最新的版本是未被删除的
                     continue
                 # 指定 newest
                 newest_revision = per_revision
                 break
 
-            if not newest_revision and req_action in ["read", "delete_rev", "recover_rev"]:  # 如果没有满足条件的 newest_revision
+            if not newest_revision and req_action in [
+                "read",
+                "delete_rev",
+                "recover_rev",
+            ]:  # 如果没有满足条件的 newest_revision
                 self.__send(json.dumps(self.RES_NOT_FOUND))
                 return
 
-            specified_revision_id, specified_revision_data = newest_revision if newest_revision else (None, None) # 指定
+            specified_revision_id, specified_revision_data = (
+                newest_revision if newest_revision else (None, None)
+            )  # 指定
 
-        else: # 如果已经指定
-
+        else:  # 如果已经指定
             # 判断是否有该 rev
             if specified_revision_id not in query_revisions:
-                self.__send(json.dumps({
-                    "code": 404,
-                    "msg": "specified revision not found"
-                }))
+                self.__send(
+                    json.dumps({"code": 404, "msg": "specified revision not found"})
+                )
                 return
 
             # 判断 rev 版本是否被删除（在特别指定了 rev_id 的时候才会出现）
-            
+
             if query_revisions[specified_revision_id]["state"] == "deleted":
                 if not view_deleted:
-                    self.__send(json.dumps({
-                        "code": 404,
-                        "msg": "specified revision not found"
-                    }))
+                    self.__send(
+                        json.dumps({"code": 404, "msg": "specified revision not found"})
+                    )
                     return
-                
+
             specified_revision_data: dict = query_revisions[specified_revision_id]
-            
-        
+
         # 正式处理对文件的操作，实际指向确定的 rev
         # 获取 revision <- getFileRevisions()
-
 
         self.log.logger.debug(f"请求对文件版本ID {specified_revision_id} 的操作：{req_action}")
 
@@ -1649,17 +1668,21 @@ class ConnHandler:
             "move",
             "change_id",
             "delete_rev",
-            "recover_rev"
+            "recover_rev",
         ]:
             # 注意：write 操作仅支持覆盖，创建请使用 uploadFile
-            
+
             # 在检查文档整体的权限的同时检查对特定版本的权限
-            if not self._verifyAccess(user, req_action, specified_revision_data["access_rules"], 
-                                        specified_revision_data["external_access"]):
+            if not self._verifyAccess(
+                user,
+                req_action,
+                specified_revision_data["access_rules"],
+                specified_revision_data["external_access"],
+            ):
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 self.log.logger.debug("权限校验失败：无权在该历史版本执行所请求的操作")
                 return
-            
+
             specified_revision_file_id: str = specified_revision_data["file_id"]
 
             if req_action == "read":
@@ -1677,7 +1700,9 @@ class ConnHandler:
                     username=user.username,
                 )
 
-                mapping = {file_id: specified_revision_file_id} # 伪路径文件ID: 该版本 index 表 文件ID
+                mapping = {
+                    file_id: specified_revision_file_id
+                }  # 伪路径文件ID: 该版本 index 表 文件ID
 
                 response = {
                     "code": 0,
@@ -1692,10 +1717,8 @@ class ConnHandler:
 
                 self.__send(json.dumps(response))
 
-            elif req_action == "write": # 该操作将使得最新版本的 revision 指向给定的文件
-                do_force_write = loaded_recv["data"].get(
-                    "force_write", False
-                )
+            elif req_action == "write":  # 该操作将使得最新版本的 revision 指向给定的文件
+                do_force_write = loaded_recv["data"].get("force_write", False)
 
                 if file_state_code := file_state["code"] != "ok":
                     if file_state_code == "locked":
@@ -1705,9 +1728,7 @@ class ConnHandler:
                                     "code": -1,
                                     "msg": "file locked",
                                     "data": {
-                                        "expire_time": file_state.get(
-                                            "expire_time", 0
-                                        )
+                                        "expire_time": file_state.get("expire_time", 0)
                                     },
                                 }
                             )
@@ -1720,9 +1741,7 @@ class ConnHandler:
                                     "code": -1,
                                     "msg": "The file has been marked for deletion, please restore it first",
                                     "data": {
-                                        "expire_time": file_state.get(
-                                            "expire_time", 0
-                                        )
+                                        "expire_time": file_state.get("expire_time", 0)
                                     },
                                 }
                             )
@@ -1730,13 +1749,11 @@ class ConnHandler:
 
                     else:
                         self.__send(
-                            json.dumps(
-                                {"code": -1, "msg": "unexpected file status"}
-                            )
+                            json.dumps({"code": -1, "msg": "unexpected file status"})
                         )
 
                     return
-                
+
                 ### 创建一个新的 revision
 
                 # 得到新的随机文件ID，此时文件应当已创建
@@ -1749,7 +1766,7 @@ class ConnHandler:
                     "state": {"code": "ok", "expire_time": 0},
                     "access_rules": {},
                     "external_access": {},
-                    "time": time.time()
+                    "time": time.time(),
                 }
 
                 ## 写入新的 revision
@@ -1758,13 +1775,20 @@ class ConnHandler:
                 # handle_cursor.execute("BEGIN TRANSACTION;")
 
                 # 读取
-                handle_cursor.execute("SELECT `revisions` FROM path_structures WHERE `id` = ?", (file_id,))
-                _revisions_now = json.loads(handle_cursor.fetchone()[0]) # 由于主键的互异性，此处应该仅有一条结果
+                handle_cursor.execute(
+                    "SELECT `revisions` FROM path_structures WHERE `id` = ?", (file_id,)
+                )
+                _revisions_now = json.loads(
+                    handle_cursor.fetchone()[0]
+                )  # 由于主键的互异性，此处应该仅有一条结果
 
                 _insert_revisions = _revisions_now
                 _insert_revisions[new_revision_id] = new_revision_data
 
-                handle_cursor.execute("UPDATE path_structures SET `revisions` = ? WHERE `id` = ?; ", (json.dumps(_insert_revisions), file_id))
+                handle_cursor.execute(
+                    "UPDATE path_structures SET `revisions` = ? WHERE `id` = ?; ",
+                    (json.dumps(_insert_revisions), file_id),
+                )
 
                 self.db_conn.commit()
 
@@ -1784,9 +1808,7 @@ class ConnHandler:
                         username=user.username,
                     )
                 except PendingWriteFileError:
-                    self.__send(
-                        json.dumps({"code": -1, "msg": "file already in use"})
-                    )
+                    self.__send(json.dumps({"code": -1, "msg": "file already in use"}))
                     return
 
                 mapping = {file_id: new_revision_file_id}
@@ -1821,9 +1843,7 @@ class ConnHandler:
                                     "code": -1,
                                     "msg": "file locked",
                                     "data": {
-                                        "expire_time": file_state.get(
-                                            "expire_time", 0
-                                        )
+                                        "expire_time": file_state.get("expire_time", 0)
                                     },
                                 }
                             )
@@ -1840,7 +1860,7 @@ class ConnHandler:
                 self.__send(json.dumps({"code": 0, "msg": "success"}))
 
             elif req_action == "delete":
-                recycle_policy = Policies("recycle", self.db_conn)
+                recycle_policy = Policies("recycle", self.db_conn, self.db_cursor)
                 delete_after_marked_time = recycle_policy["deleteAfterMarked"]
 
                 if file_state["code"] == "deleted":
@@ -1870,9 +1890,7 @@ class ConnHandler:
 
             elif req_action == "recover":
                 if file_state["code"] != "deleted":
-                    self.__send(
-                        json.dumps({"code": -1, "msg": "File is not deleted"})
-                    )
+                    self.__send(json.dumps({"code": -1, "msg": "File is not deleted"}))
                     return
 
                 recovered_state = {"code": "ok", "expire_time": 0}
@@ -1881,7 +1899,7 @@ class ConnHandler:
                     "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
                     (json.dumps(recovered_state), file_id),
                 )
-                
+
                 self.db_conn.commit()
 
                 self.__send(json.dumps(self.RES_OK))
@@ -1988,36 +2006,38 @@ class ConnHandler:
                 self.__send(json.dumps(self.RES_OK))
 
                 return
-            
-            elif req_action == "delete_rev": # 删除指定的修订
 
-                recycle_policy = Policies("recycle", self.db_conn)
+            elif req_action == "delete_rev":  # 删除指定的修订
+                recycle_policy = Policies("recycle", self.db_conn, self.db_cursor)
                 rev_delete_after_marked_time = recycle_policy["revDeleteAfterMarked"]
 
                 if specified_revision_data["state"]["code"] == "deleted":
-                    self.__send(json.dumps({
-                        "code": -1,
-                        "msg": "already deleted"
-                    }))
+                    self.__send(json.dumps({"code": -1, "msg": "already deleted"}))
                     return
-                
 
                 # 执行事务
 
                 # handle_cursor.execute("BEGIN TRANSACTION;")
 
                 # 读取
-                handle_cursor.execute("SELECT `revisions` FROM path_structures WHERE `id` = ?", (file_id,))
-                _revisions_now = json.loads(handle_cursor.fetchone()[0]) # 由于主键的互异性，此处应该仅有一条结果
+                handle_cursor.execute(
+                    "SELECT `revisions` FROM path_structures WHERE `id` = ?", (file_id,)
+                )
+                _revisions_now = json.loads(
+                    handle_cursor.fetchone()[0]
+                )  # 由于主键的互异性，此处应该仅有一条结果
 
                 # 构造写入
-                
+
                 _revisions_now[specified_revision_id]["state"] = {
                     "code": "deleted",
-                    "expire_time": time.time() + rev_delete_after_marked_time
+                    "expire_time": time.time() + rev_delete_after_marked_time,
                 }
 
-                handle_cursor.execute("UPDATE path_structures SET `revisions` = ? WHERE `id` = ?;", (_revisions_now, file_id))
+                handle_cursor.execute(
+                    "UPDATE path_structures SET `revisions` = ? WHERE `id` = ?;",
+                    (_revisions_now, file_id),
+                )
 
                 # handle_cursor.execute("COMMIT TRANSACTION;")
                 self.db_conn.commit()
@@ -2025,12 +2045,13 @@ class ConnHandler:
                 self.__send(json.dumps(self.RES_OK))
 
                 return
-            
+
             elif req_action == "recover_rev":
-                
                 if specified_revision_data["state"]["code"] != "deleted":
                     self.__send(
-                        json.dumps({"code": -1, "msg": "Specified revision is not deleted"})
+                        json.dumps(
+                            {"code": -1, "msg": "Specified revision is not deleted"}
+                        )
                     )
                     return
 
@@ -2041,20 +2062,26 @@ class ConnHandler:
                 # handle_cursor.execute("BEGIN TRANSACTION;")
 
                 # 读取
-                handle_cursor.execute("SELECT `revisions` FROM path_structures WHERE `id` = ?", (file_id,))
-                _revisions_now = json.loads(handle_cursor.fetchone()[0]) # 由于主键的互异性，此处应该仅有一条结果
+                handle_cursor.execute(
+                    "SELECT `revisions` FROM path_structures WHERE `id` = ?", (file_id,)
+                )
+                _revisions_now = json.loads(
+                    handle_cursor.fetchone()[0]
+                )  # 由于主键的互异性，此处应该仅有一条结果
 
                 # 构造写入
-                
+
                 _revisions_now[specified_revision_id]["state"] = recovered_state
 
-                handle_cursor.execute("UPDATE path_structures SET `revisions` = ? WHERE `id` = ?;", (_revisions_now, file_id))
+                handle_cursor.execute(
+                    "UPDATE path_structures SET `revisions` = ? WHERE `id` = ?;",
+                    (_revisions_now, file_id),
+                )
 
                 # handle_cursor.execute("COMMIT TRANSACTION;")
                 self.db_conn.commit()
 
                 self.__send(json.dumps(self.RES_OK))
-
 
         else:
             self.__send(json.dumps({"code": -1, "msg": "operation not found"}))
@@ -2077,19 +2104,13 @@ class ConnHandler:
         if not new_usr_username or not new_usr_pwd:
             self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
+
         # 检查长度是否合法
-        if len(new_usr_username) > 32: # max 255
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "username too long"
-            }))
+        if len(new_usr_username) > 32:  # max 255
+            self.__send(json.dumps({"code": -1, "msg": "username too long"}))
             return
         if len(new_usr_nickname) > 64:
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "user nickname too long"
-            }))
+            self.__send(json.dumps({"code": -1, "msg": "user nickname too long"}))
             return
 
         if not user.hasRights(("create_user",)):
@@ -2097,7 +2118,7 @@ class ConnHandler:
             return
 
         # 判断用户是否存在
-        new_user = Users(new_usr_username, self.db_conn)
+        new_user = Users(new_usr_username, self.db_conn, self.db_cursor)
         if new_user.ifExists():
             self.__send(json.dumps({"code": -1, "msg": "user exists"}))
             return
@@ -2105,7 +2126,7 @@ class ConnHandler:
         new_usr_rights = loaded_recv["data"].get("rights", None)
         new_usr_groups = loaded_recv["data"].get("groups", None)
 
-        auth_policy = Policies("user_auth", self.db_conn)
+        auth_policy = Policies("user_auth", self.db_conn, self.db_cursor)
 
         if new_usr_groups != None or new_usr_rights != None:
             if not user.hasRights(("custom_new_user_settings",)):
@@ -2162,10 +2183,7 @@ class ConnHandler:
 
         if new_group_name:
             if len(new_group_name) > 32:
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "group name too long"
-                }))
+                self.__send(json.dumps({"code": -1, "msg": "group name too long"}))
                 return
         else:
             self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
@@ -2189,7 +2207,7 @@ class ConnHandler:
 
         new_group_rights = loaded_recv["data"].get("rights", None)
 
-        group_policy = Policies("group_settings", self.db_conn)
+        group_policy = Policies("group_settings", self.db_conn, self.db_cursor)
 
         if new_group_rights != None or new_group_enabled != None:  # 不为未提供的，因提供空列表也是一种提交
             if not user.hasRights(("custom_new_group_settings",)):
@@ -2228,7 +2246,9 @@ class ConnHandler:
         )
 
         for i in new_group_members:
-            handle_cursor.execute("SELECT `groups` FROM `users` WHERE `username` = ?", (i,))
+            handle_cursor.execute(
+                "SELECT `groups` FROM `users` WHERE `username` = ?", (i,)
+            )
             query_result = handle_cursor.fetchone()
             if not query_result:
                 errors.append((i, "NOT_FOUND"))
@@ -2285,7 +2305,7 @@ class ConnHandler:
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
 
-            query_user_object = Users(target_username, self.db_conn)
+            query_user_object = Users(target_username, self.db_conn, self.db_cursor)
             if not query_user_object.ifExists():
                 self.__send(json.dumps(self.RES_NOT_FOUND))
                 return
@@ -2406,7 +2426,9 @@ class ConnHandler:
                         "properties": filtered_properties,
                     }
 
-                por_policy = Policies("permission_on_rootdir", self.db_conn)
+                por_policy = Policies(
+                    "permission_on_rootdir", self.db_conn, self.db_cursor
+                )
 
                 if parent_id:
                     if self.verifyUserAccess(parent_id, "read", user):  # 检查是否有权访问父级目录
@@ -2452,7 +2474,7 @@ class ConnHandler:
                 self.__send(json.dumps({"code": 0, "dir_data": dir_result}))
 
             elif action == "delete":
-                recycle_policy = Policies("recycle", self.db_conn)
+                recycle_policy = Policies("recycle", self.db_conn, self.db_cursor)
                 delete_after_marked_time = recycle_policy["deleteAfterMarked"]
 
                 if dir_state["code"] == "deleted":
@@ -2555,7 +2577,8 @@ class ConnHandler:
                 handle_cursor = self.db_cursor
 
                 handle_cursor.execute(
-                    "SELECT `type` FROM path_structures WHERE `id` = ?", (new_parent_id,)
+                    "SELECT `type` FROM path_structures WHERE `id` = ?",
+                    (new_parent_id,),
                 )
 
                 query_result = handle_cursor.fetchall()
@@ -2634,7 +2657,8 @@ class ConnHandler:
                 # 执行操作
 
                 handle_cursor.execute(
-                    "UPDATE path_structures SET `id` = ? WHERE `id` = ?;", (new_id, dir_id)
+                    "UPDATE path_structures SET `id` = ? WHERE `id` = ?;",
+                    (new_id, dir_id),
                 )
 
                 self.db_conn.commit()
@@ -2668,10 +2692,7 @@ class ConnHandler:
 
         if target_id:  # 自动生成
             if len(target_id) > 64:
-                self.__send(json.dumps({
-                    "code": -1,
-                    "msg": "directory id too long"
-                }))
+                self.__send(json.dumps({"code": -1, "msg": "directory id too long"}))
                 return
         else:
             target_id = secrets.token_hex(16)
@@ -2726,7 +2747,7 @@ class ConnHandler:
                 return
 
         else:
-            por_policy = Policies("permission_on_rootdir", self.db_conn)
+            por_policy = Policies("permission_on_rootdir", self.db_conn, self.db_cursor)
 
             por_access_rules = por_policy["rules"]["access_rules"]
             por_external_access = por_policy["rules"]["external_access"]
@@ -2783,7 +2804,6 @@ class ConnHandler:
 
     @userOperationAuthWrapper
     def handle_operateUser(self, loaded_recv, user: Users):
-
         handle_cursor = self.db_cursor
 
         if "data" not in loaded_recv:
@@ -2804,7 +2824,7 @@ class ConnHandler:
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
 
-        dest_user = Users(username, self.db_conn)
+        dest_user = Users(username, self.db_conn, self.db_cursor)
 
         if not dest_user.ifExists():
             self.__send(json.dumps({"code": 404, "msg": "user not found"}))
@@ -2832,18 +2852,21 @@ class ConnHandler:
                 if not user.hasRights(("set_nickname",)):
                     self.__send(json.dumps(self.RES_ACCESS_DENIED))
                     return
-                
+
                 # if user.username != dest_user.username and not user.hasRights(("set_others",)):
                 #     pass
 
-                handle_cursor.execute("UPDATE `users` SET `nickname` = ? WHERE `username` = ?", (dest_user.username,))
-                
+                handle_cursor.execute(
+                    "UPDATE `users` SET `nickname` = ? WHERE `username` = ?",
+                    (dest_user.username,),
+                )
+
                 self.db_conn.commit()
 
                 self.__send(json.dumps(self.RES_OK))
                 return
 
-            elif action == "delete": 
+            elif action == "delete":
                 if not user.hasRights(("delete_user",)):
                     self.__send(json.dumps(self.RES_ACCESS_DENIED))
                     return
@@ -3000,28 +3023,30 @@ class ConnHandler:
         else:
             self.__send(json.dumps(self.RES_BAD_REQUEST))
 
-    
     @userOperationAuthWrapper
     def handle_getFileRevisions(self, loaded_recv, user: Users):
         try:
             file_id: str = loaded_recv["data"]["file_id"]
             view_deleted: bool = bool(loaded_recv["data"].get("view_deleted", False))
-            reverse: bool = bool(loaded_recv["data"].get("reverse", True)) # 反序，默认开启 - 按从新到旧排序
-            item_range: tuple[int, int] = tuple(loaded_recv["data"].get("item_range", ()))
+            reverse: bool = bool(
+                loaded_recv["data"].get("reverse", True)
+            )  # 反序，默认开启 - 按从新到旧排序
+            item_range: tuple[int, int] = tuple(
+                loaded_recv["data"].get("item_range", ())
+            )
         except KeyError:
             self.__send(json.dumps(self.RES_MISSING_ARGUMENT))
             return
-        
+
         # 判断文件是否存在
         if not self._hasFileRecord(file_id):
             self.__send(json.dumps(self.RES_NOT_FOUND))
             return
 
-
-        if not self.verifyUserAccess(file_id, "read", user): # 目前仅要求用户具有 read 权限，未来可能细化
+        if not self.verifyUserAccess(file_id, "read", user):  # 目前仅要求用户具有 read 权限，未来可能细化
             self.__send(json.dumps(self.RES_ACCESS_DENIED))
             return
-        
+
         if view_deleted:
             if not user.hasRights(("view_deleted",)):
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
@@ -3030,71 +3055,74 @@ class ConnHandler:
         if not item_range:
             item_range = (0, 10)
 
-        if len(item_range) != 2 or not isinstance(item_range[0], int) or not isinstance(item_range[1], int)\
-            or item_range[0] > item_range[1] or item_range < (0, 1): # item_range 必须前者小于后者，如需倒序使用 reverse 函数
-            self.__send(json.dumps({
-                "code": 400,
-                "msg": "invaild range syntax"
-            }))
+        if (
+            len(item_range) != 2
+            or not isinstance(item_range[0], int)
+            or not isinstance(item_range[1], int)
+            or item_range[0] > item_range[1]
+            or item_range < (0, 1)
+        ):  # item_range 必须前者小于后者，如需倒序使用 reverse 函数
+            self.__send(json.dumps({"code": 400, "msg": "invaild range syntax"}))
             return
 
-        if (max_count:=item_range[1] - item_range[0]) > 50:
-            self.__send(json.dumps({
-                "code": 400,
-                "msg": "max revision count out of range"
-            }))
+        if (max_count := item_range[1] - item_range[0]) > 50:
+            self.__send(
+                json.dumps({"code": 400, "msg": "max revision count out of range"})
+            )
             return
-        
+
         handle_cursor = self.db_cursor
 
-        handle_cursor.execute("SELECT `type`, `revisions` FROM path_structures WHERE `id` = ?", (file_id,))
+        handle_cursor.execute(
+            "SELECT `type`, `revisions` FROM path_structures WHERE `id` = ?", (file_id,)
+        )
         query_result = handle_cursor.fetchone()
 
         if not query_result:
             self.__send(json.dumps(self.RES_NOT_FOUND))
             return
-        
+
         if query_result[0] != "file":
-            self.__send(json.dumps({
-                "code": -1,
-                "msg": "not a file"
-            }))
+            self.__send(json.dumps({"code": -1, "msg": "not a file"}))
             return
-        
+
         query_revisions = json.loads(query_result[1])
 
         # 开始剔除不可用 revisions
 
         # 排序
-        sorted_revisions: list[tuple] = sorted(query_revisions.items(), key = lambda i: i[1]['time'], reverse=reverse)
+        sorted_revisions: list[tuple] = sorted(
+            query_revisions.items(), key=lambda i: i[1]["time"], reverse=reverse
+        )
 
         final_revisions = {}
 
         revisions_count = len(sorted_revisions)
 
-        _i = 0 # 总的循环次数，不能大于 revisions_count
-        _k = 0 # 成功的次数，不应大于 max_count
+        _i = 0  # 总的循环次数，不能大于 revisions_count
+        _k = 0  # 成功的次数，不应大于 max_count
 
-        while _i < revisions_count and _k < max_count if max_count <= revisions_count else revisions_count:
+        while _i < revisions_count and _k < (
+            max_count if max_count <= revisions_count else revisions_count
+        ):
+            _i += 1  # _i 加了1，此时才正确表示本次循环的序号
 
-            _i += 1 # _i 加了1，此时才正确表示本次循环的序号
-
-            per_revision = sorted_revisions[item_range[0]+_i-1]
+            per_revision = sorted_revisions[item_range[0] + _i - 1]
 
             if per_revision[1]["state"]["code"] == "deleted" and not view_deleted:
                 continue
 
             this_revision_id, this_revision_data = per_revision
 
-            if self._verifyAccess(user, "read", this_revision_data["access_rules"], this_revision_data["external_access"]):
+            if self._verifyAccess(
+                user,
+                "read",
+                this_revision_data["access_rules"],
+                this_revision_data["external_access"],
+            ):
                 final_revisions[this_revision_id] = this_revision_data
                 _k += 1
 
-
-        self.__send(json.dumps({
-            "code": 0,
-            "msg": "ok",
-            "data": {
-                "revisions": final_revisions
-            }
-        }))
+        self.__send(
+            json.dumps({"code": 0, "msg": "ok", "data": {"revisions": final_revisions}})
+        )

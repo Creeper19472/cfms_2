@@ -1,15 +1,22 @@
 import sqlite3
 import json
+from typing import Union
 from jsonschema import validate # TODO #8
 
+from mysql.connector.connection import MySQLConnection
+from mysql.connector.cursor import MySQLCursorPrepared
+
 class Policies(object):
-    def __init__(self, policy_id, sql_object: sqlite3.Connection) -> None:
+    def __init__(self, policy_id, db_conn: Union[sqlite3.Connection, MySQLConnection], \
+                 db_cursor: Union[sqlite3.Cursor, MySQLCursorPrepared]) -> None:
         self.policy_id = policy_id
 
         # load policy, not refreshable
 
-        self.conn = sql_object
-        self.cursor = self.conn.cursor()
+        self.conn = db_conn
+        self.cursor = db_cursor
+
+        # print(self.cursor._connection)
 
         self.cursor.execute("SELECT `content`, `access_rules`, `external_access` FROM `policies` WHERE `id` = ?", (self.policy_id,))
 

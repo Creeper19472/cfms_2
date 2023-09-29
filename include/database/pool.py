@@ -14,6 +14,9 @@ def getDBPool(config: dict):
         mysql_username = config["database"]["mysql_username"]
         mysql_password = config["database"]["mysql_password"]
 
+        # 检查连接池设置是否存在问题
+        if (config_pmc:=config["database"]["pool_max_connections"]) <= 0 or config_pmc > 32:
+            raise ValueError("Max pool connections out of range")
         # 指定使用的数据库
         mysql_db_name = config["database"]["mysql_db_name"]
 
@@ -24,7 +27,7 @@ def getDBPool(config: dict):
             passwd=mysql_password,        # 数据库密码
             port=mysql_port,
             database=mysql_db_name,
-            pool_size = 10
+            pool_size = config_pmc
         )
 
         return mysql_pool
