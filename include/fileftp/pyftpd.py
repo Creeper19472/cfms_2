@@ -268,6 +268,8 @@ class DummyMD5Authorizer(DummyAuthorizer):
             }
         self.user_table[username] = dic
 
+        g_db.close()
+
     def get_home_dir(self, username):
         return self.user_table[username]['home']
     

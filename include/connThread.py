@@ -1050,52 +1050,33 @@ class ConnHandler:
 
         ### 结束
 
-        if loaded_recv["request"] == "refreshToken":
-            self.log.logger.debug("收到客户端的 refreshToken 请求")
+        # 定义了支持的所有请求类型。
+        available_requests = {
+            # "refreshToken": self.handle_refreshToken(attached_username, attached_token),
+            "operateFile": self.handle_operateFile,
+            "operateDir": self.handle_operateDir,
+            "operateUser": self.handle_operateUser,
+            "getRootDir": self.handle_getRootDir,
+            "getPolicy": self.handle_getPolicy,
+            "getAvatar": self.handle_getAvatar, 
+            "createFile": self.handle_createFile,
+            "createUser": self.handle_createUser,
+            "createDir": self.handle_createDir,
+            "createGroup": self.handle_createGroup,
+            "getUserProperties": self.handle_getUserProperties,
+            "getFileRevisions": self.handle_getFileRevisions,
+            "shutdown": self.handle_shutdown,
+        }
 
+        given_request = loaded_recv["request"]
+
+        if given_request == "refreshToken":
             self.handle_refreshToken(attached_username, attached_token)
-
-        elif loaded_recv["request"] == "operateFile":
-            self.handle_operateFile(loaded_recv)
-
-        elif loaded_recv["request"] == "operateDir":
-            self.handle_operateDir(loaded_recv)
-
-        elif loaded_recv["request"] == "operateUser":
-            self.handle_operateUser(loaded_recv)
-
-        elif loaded_recv["request"] == "getRootDir":
-            self.handle_getRootDir(loaded_recv)
-
-        elif loaded_recv["request"] == "getPolicy":
-            self.handle_getPolicy(loaded_recv)
-
-        elif loaded_recv["request"] == "getAvatar":
-            self.handle_getAvatar(loaded_recv)
-
-        elif loaded_recv["request"] == "createFile":
-            self.handle_createFile(loaded_recv)
-
-        elif loaded_recv["request"] == "createUser":
-            self.handle_createUser(loaded_recv)
-
-        elif loaded_recv["request"] == "createDir":
-            self.handle_createDir(loaded_recv)
-
-        elif loaded_recv["request"] == "createGroup":
-            self.handle_createGroup(loaded_recv)
-
-        elif loaded_recv["request"] == "getUserProperties":
-            self.handle_getUserProperties(loaded_recv)
-
-        elif loaded_recv["request"] == "getFileRevisions":
-            self.handle_getFileRevisions(loaded_recv)
-
-        elif loaded_recv["request"] == "shutdown":
-            self.handle_shutdown(loaded_recv)
-
         else:
-            self.__send(json.dumps({"code": -1, "msg": "unknown request"}))
+            if given_request in available_requests:
+                available_requests[given_request](loaded_recv)
+            else:
+                self.__send(json.dumps({"code": -1, "msg": "unknown request"}))
 
         # 收尾
         self.this_time_token = None

@@ -137,6 +137,7 @@ def task_clearExpiredFile():
             count += 1
 
     general_db.commit()
+    general_db.close()
 
     if count:
         logger.info(f"过期文件清理完成，处理了 {count} 个项目")
