@@ -1052,7 +1052,7 @@ class ConnHandler:
 
         # 定义了支持的所有请求类型。
         available_requests = {
-            # "refreshToken": self.handle_refreshToken(attached_username, attached_token),
+            "refreshToken": self.handle_refreshToken,
             "operateFile": self.handle_operateFile,
             "operateDir": self.handle_operateDir,
             "operateUser": self.handle_operateUser,
@@ -1070,13 +1070,10 @@ class ConnHandler:
 
         given_request = loaded_recv["request"]
 
-        if given_request == "refreshToken":
-            self.handle_refreshToken(attached_username, attached_token)
+        if given_request in available_requests:
+            available_requests[given_request](loaded_recv)
         else:
-            if given_request in available_requests:
-                available_requests[given_request](loaded_recv)
-            else:
-                self.__send(json.dumps({"code": -1, "msg": "unknown request"}))
+            self.__send(json.dumps({"code": -1, "msg": "unknown request"}))
 
         # 收尾
         self.this_time_token = None
@@ -1142,7 +1139,10 @@ class ConnHandler:
     def handle_logout(self):
         pass
 
-    def handle_refreshToken(self, req_username, old_token):
+    def handle_refreshToken(self, loaded_recv):
+        old_token = loaded_recv["auth"]["token"]
+        req_username = loaded_recv["auth"]["username"]
+
         user = Users(req_username, self.db_conn, self.db_cursor)  # 初始化用户对象
         # 读取 token_secret
         with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:

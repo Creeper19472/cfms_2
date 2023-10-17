@@ -11,8 +11,10 @@ import os
 from include.logtool import getCustomLogger
 from include.database.abstracted import getDBConnection
 
-def _permanentlyDeleteFile(fake_path_id, db_conn):
-    g_cur = db_conn.cursor()
+from mysql.connector.pooling import PooledMySQLConnection
+
+def _permanentlyDeleteFile(fake_path_id, db_conn, g_cur):
+    # g_cur = db_conn.cursor()
 
     # 查询文件信息
 
@@ -75,9 +77,9 @@ def _permanentlyDeleteFile(fake_path_id, db_conn):
 
     return True
 
-def _permanentlyDeleteDir(path_id, db_conn): # 这将导致其下所有文件被永久删除，不判断是否被标记删除
+def _permanentlyDeleteDir(path_id, db_conn, g_cur): # 这将导致其下所有文件被永久删除，不判断是否被标记删除
     
-    g_cur = db_conn.cursor()
+    # g_cur = db_conn.cursor()
 
     # 查询文件信息
 
@@ -96,17 +98,20 @@ def _permanentlyDeleteDir(path_id, db_conn): # 这将导致其下所有文件被
 
         if this_object_type == "dir":
             # db_conn.commit() # 以防万一先提交
-            _permanentlyDeleteDir(this_object_id, db_conn) # 这要求函数尚未写入
+            _permanentlyDeleteDir(this_object_id, db_conn, g_cur) # 这要求函数尚未写入
 
         elif this_object_type == "file":
-            _permanentlyDeleteFile(this_object_id, db_conn)
+            _permanentlyDeleteFile(this_object_id, db_conn, g_cur)
 
     return True
 
 def task_clearExpiredFile():
     
-    general_db = getDBConnection(DB_POOL)      
-    g_cur = general_db.cursor()
+    general_db = getDBConnection(DB_POOL)
+    if isinstance(general_db, PooledMySQLConnection):
+        g_cur = general_db._cnx.cursor(prepared=True)     
+    else:
+        g_cur = general_db.cursor()
 
     g_cur.execute("SELECT `id`, `state`, `type` FROM path_structures where `state` like '%\"deleted\"%';")
     query_result = g_cur.fetchall()
@@ -122,19 +127,21 @@ def task_clearExpiredFile():
 
             if this_object_type == "file":
                 try:
-                    _permanentlyDeleteFile(this_object_id, general_db)
+                    _permanentlyDeleteFile(this_object_id, general_db, g_cur)
                 except FileNotFoundError:
                     logger.debug(f"指定的文件 (ID: {this_object_id} )已不存在。")
                 
                 logger.info(f"自动清理：删除了过期的文件 (ID: {this_object_id})")
                 
             elif this_object_type == "dir":
-                if _permanentlyDeleteDir(this_object_id, general_db):
+                if _permanentlyDeleteDir(this_object_id, general_db, g_cur):
                     logger.info(f"自动清理：删除了过期的文件夹 (ID: {this_object_id})，及其所有文件")
                 else:
                     logger.error(f"自动清理文件夹 (ID: {this_object_id}) 时发生未知错误。")
 
             count += 1
+
+    g_cur.close()
 
     general_db.commit()
     general_db.close()
