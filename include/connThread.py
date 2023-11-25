@@ -39,6 +39,8 @@ from typing import Iterable, Self
 
 import uuid
 
+import include.scripts.auth as auth
+
 
 class PendingWriteFileError(Exception):
     pass
@@ -1015,6 +1017,7 @@ class ConnHandler:
             )  # 日志记录密码哈希其实是有泄露危险的
 
             self.handle_login(req_username, req_password)
+            # auth.handle_login(self, req_username, req_password)
 
             return  # 如果不返回，那么下面的判断就会被执行了
 
@@ -1052,6 +1055,7 @@ class ConnHandler:
 
         # 定义了支持的所有请求类型。
         available_requests = {
+            # "refreshToken": auth.handle_refreshToken,
             "refreshToken": self.handle_refreshToken,
             "operateFile": self.handle_operateFile,
             "operateDir": self.handle_operateDir,

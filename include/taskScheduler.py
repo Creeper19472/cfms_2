@@ -174,6 +174,8 @@ def task_clearFTPCache():
             os.rmdir(temp_path)
 
 
+    f_cur.close()
+
     ftdb.commit()
     ftdb.close()
 
