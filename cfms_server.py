@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "231017_alpha")
+CORE_VERSION = (1, 0, 0, "240104_alpha")
 READABLE_VERSION = (
     f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
 )
@@ -489,6 +489,9 @@ def dbInit(db_object: AbstractedConnection):
 
 
 def mainloop(serverd):
+
+    return
+
     created_count = 0
 
     # consoledThread = threading.Thread(target=consoled,name="consoled")
@@ -605,7 +608,8 @@ if __name__ == "__main__":
 
         log.cshandler.setLevel(logging.DEBUG)
         log.logger.info("Debug mode enabled.")
-    log.logger.debug(config)
+    
+    log.logger.debug(f"config: {config}")
 
     starttime = time.time()  # 这里还有个endtime，但我懒得写了
 
@@ -614,15 +618,10 @@ if __name__ == "__main__":
     log.logger.info(f"Version {READABLE_VERSION}")
     log.logger.info("Running On: Python %s" % sys.version)
     if sys.version_info < (3, 11):  # 基于Python 3.11 开发，因此低于此版本就无法运行
-        log.logger.fatal("您正在运行的 Python 版本低于本系统的最低要求。")
+        log.logger.fatal("您正在运行的 Python 版本低于本系统的最低要求 (>=3.11)。")
         log.logger.fatal("由于此原因，程序无法继续。")
         sys.exit()
 
-    # 优先载入插件
-    hook_spec = pluggy.HookspecMarker("cfms")
-    hook_impl = pluggy.HookimplMarker("cfms")
-
-    pm = pluggy.PluginManager("cfms")
 
     db_type = config["database"]["db_type"]
 
@@ -668,8 +667,8 @@ if __name__ == "__main__":
             ts_file.truncate(0)  # 清空
             ts_file.write(secrets.token_hex(128))
 
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+    # server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
     ipv4_addr = (config["connect"]["ipv4_addr"], config["connect"]["port"])
     ipv6_addr = (config["connect"]["ipv6_addr"], config["connect"]["port"])
 
@@ -678,12 +677,12 @@ if __name__ == "__main__":
 
     sem = threading.Semaphore(semaphore_count)
 
-    if config["connect"]["ipv4_enabled"]:
-        server.bind(ipv4_addr)
-        server.listen(max_queue)
-    if config["connect"]["ipv6_enabled"]:
-        server.bind(ipv6_addr)
-        server.listen(max_queue)
+    # if config["connect"]["ipv4_enabled"]:
+    #     server.bind(ipv4_addr)
+    #     server.listen(max_queue)
+    # if config["connect"]["ipv6_enabled"]:
+    #     server.bind(ipv6_addr)
+    #     server.listen(max_queue)
 
     if config["connect"]["ipv4_enabled"]:
         log.logger.info((f"IPv4 Address: {ipv4_addr}"))
@@ -694,8 +693,9 @@ if __name__ == "__main__":
     else:
         log.logger.info(("IPv6 is not supported."))
 
-    mainloopThread = threading.Thread(target=lambda: mainloop(server), name="mainloop")
-    mainloopThread.start()
+    from include.experimental.server import ThreadedSocketServer, SocketHandler
+
+    # 由于启动主服务会导致阻塞，因此所有线程操作必须提前启动
 
     # 初始化 FTPServer
     log.logger.info(f'正在初始化 FTP 服务... 端口开放在 {config["connect"]["ftp_port"]}.')
@@ -722,8 +722,19 @@ if __name__ == "__main__":
     SchedulerThread.start()
 
     endtime = time.time()
-    log.logger.info(f"完成（{endtime - starttime} s）！")
+    log.logger.info(f"完成（{endtime - starttime} s）！正在启动主要服务。")
 
-    mainloopThread.join()  # 主线程保活，以支持计划任务运行
+    with ThreadedSocketServer(ipv4_addr, SocketHandler, server_config=config, db_pool=db_pool) as server:
+        # Activate the server; this will keep running until you
+        # interrupt the program with Ctrl-C
+        # server._db_pool = db_pools
+        server.serve_forever()
+
+    
+
+    # mainloopThread = threading.Thread(target=lambda: mainloop(server), name="mainloop")
+    # mainloopThread.start()
+
+    # mainloopThread.join()  # 主线程保活，以支持计划任务运行
 
     sys.exit()

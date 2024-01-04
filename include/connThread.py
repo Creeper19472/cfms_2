@@ -39,8 +39,6 @@ from typing import Iterable, Self
 
 import uuid
 
-import include.scripts.auth as auth
-
 
 class PendingWriteFileError(Exception):
     pass

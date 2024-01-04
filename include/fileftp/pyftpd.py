@@ -8,7 +8,7 @@ from include.database.pool import getDBPool
 from include.logtool import getCustomLogger
 sys.path.append("./include/") # relative hack
 
-from modules.pyftpdlib.servers import ThreadedFTPServer  # <-
+from packages.pyftpdlib.servers import ThreadedFTPServer  # <-
 
 import os
 import sys, json
@@ -17,13 +17,13 @@ import hashlib
 import secrets, shutil
 import sqlite3
 
-from modules.pyftpdlib.log import logger
+from packages.pyftpdlib.log import logger
 # logger = getCustomLogger("main.pyftpdlib", filepath="./content/logs/pyftpd.log")
 
-from modules.pyftpdlib.handlers import FTPHandler
-from modules.pyftpdlib.handlers import TLS_FTPHandler
+from packages.pyftpdlib.handlers import FTPHandler
+from packages.pyftpdlib.handlers import TLS_FTPHandler
 
-from modules.pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
+from packages.pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 
 from include.database.abstracted import getDBConnection
 
