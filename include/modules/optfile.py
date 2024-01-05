@@ -1,5 +1,7 @@
 
+import datetime
 import os
+import secrets
 import sqlite3
 import uuid
 from include.bulitin_class.policies import Policies
@@ -664,3 +666,175 @@ def handle_operateFile(instance, loaded_recv, user: Users):
         instance.respond(**{"code": -1, "msg": "operation not found"})
         instance.logger.debug("请求的操作不存在。")
         return
+
+def handle_createFile(instance, loaded_recv, user: Users):
+    if "data" not in loaded_recv:
+        instance.respond(**instance.RES_MISSING_ARGUMENT)
+
+    target_directory_id = loaded_recv["data"].get(
+        "directory_id", ""
+    )  # fallback to rootdir
+    target_file_path_id = loaded_recv["data"].get("file_id", None)
+    target_filename = loaded_recv["data"].get(
+        "filename", f"Untitled-{int(time.time())}"
+    )
+
+    if target_file_path_id:
+        if len(target_file_path_id) > 64:
+            instance.respond(-1, msg = "file id too long")
+            return
+    else:
+        target_file_path_id = secrets.token_hex(8)
+
+    with DatabaseOperator(instance._pool) as dboptr:
+
+        dboptr[1].execute(
+            "SELECT 1 FROM path_structures WHERE id = ?", (target_file_path_id,)
+        )
+
+        query_result = dboptr[1].fetchall()
+
+        if query_result:
+            instance.respond(
+                
+                    **{
+                        "code": -1,
+                        "msg": "file or directory exists.",
+                        "__hint__": "if you want to override a file, use 'operateFile' instead.",
+                    }
+                
+            )
+            return
+
+        del query_result  # 清除
+
+        if target_directory_id:  # 如果不是根目录
+            dboptr[1].execute(
+                "SELECT `type` FROM path_structures WHERE `id` = ?",
+                (target_directory_id,),
+            )
+
+            dir_query_result = dboptr[1].fetchall()
+
+            if not dir_query_result:
+                instance.respond(
+                    **{"code": 404, "msg": "target directory not found"}
+                )
+                return
+            elif len(dir_query_result) > 1:
+                raise RuntimeError("数据库出现了不止一条同id的记录")
+
+            if (d_id_type := dir_query_result[0][0]) != "dir":
+                instance.logger.debug(
+                    f"用户试图请求在 id 为 {target_directory_id} 的目录下创建文件，\
+                                    但它事实上不是一个目录（{d_id_type}）"
+                )
+                instance.respond(**{"code": -1, "msg": "not a directory"})
+                return
+
+            if not instance.verifyUserAccess(target_directory_id, "write", user):
+                instance.respond(**instance.RES_ACCESS_DENIED)
+                return
+
+        else:
+            por_policy = Policies("permission_on_rootdir", *dboptr)
+
+            por_access_rules = por_policy["rules"]["access_rules"]
+            por_external_access = por_policy["rules"]["external_access"]
+
+            if not instance._verifyAccess(
+                user, "write", por_access_rules, por_external_access, True
+            ):
+                instance.logger.debug("用户无权访问根目录")
+                instance.respond(**instance.RES_ACCESS_DENIED)
+                return
+            else:
+                instance.logger.debug("根目录鉴权成功")
+
+        # 开始创建文件
+
+        index_file_id = secrets.token_hex(64)  # 存储在 document_indexes 中
+        real_filename = secrets.token_hex(16)
+
+        today = datetime.date.today()
+
+        destination_path = (
+            f"{instance.server.root_abspath}/content/files/{today.year}/{today.month}"
+        )
+
+        os.makedirs(destination_path, exist_ok=True)  # 即使文件夹已存在也加以继续
+
+        with open(f"{destination_path}/{real_filename}", "w") as new_file:
+            pass
+
+        # 注册数据库条目
+
+        ### 创建一个新的 revision
+
+        # 构造
+        new_revision_id: str = uuid.uuid4().hex
+        new_revision_data = {
+            "file_id": index_file_id,
+            "state": {"code": "ok", "expire_time": 0},
+            "access_rules": {},
+            "external_access": {},
+            "time": time.time(),
+        }
+
+        initial_revisions = {new_revision_id: new_revision_data}
+
+        # handle_cursor.execute("BEGIN TRANSACTION;")
+
+        dboptr[1].execute(
+            "INSERT INTO document_indexes (`id`, `abspath`) VALUES (?, ?)",
+            (index_file_id, destination_path + "/" + real_filename),
+        )
+
+        dboptr[1].execute(
+            "INSERT INTO path_structures \
+                                (`id` , `name` , `owner` , `parent_id` , `type` , `revisions` , `access_rules`, `external_access`, `properties`, `state`) \
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                target_file_path_id,
+                target_filename,
+                json.dumps((("user", user.username),)),
+                target_directory_id,
+                "file",
+                json.dumps(initial_revisions),
+                r"{}",
+                r"{}",
+                json.dumps({"created_time": time.time()}),
+                json.dumps({"code": "ok", "expire_time": 0}),
+            ),
+        )
+
+        # handle_cursor.execute("COMMIT TRANSACTION;")
+        dboptr[0].commit()
+
+        # 创建任务
+        task_id, task_token, t_filenames, expire_time = createFileTask(
+            (index_file_id,), operation="write", username=user.username
+        )
+
+        mapped_dict = convertFile2PathID(
+            t_filenames, {target_file_path_id: index_file_id}
+        )
+
+        instance.respond(
+            
+            **{
+                "code": 0,
+                "msg": "file created",
+                "data": {
+                    "task_id": task_id,
+                    "task_token": task_token,
+                    "t_filename": mapped_dict,
+                    "expire_time": expire_time,
+                },
+            }
+        
+        )
+
+    del dboptr
+
+    return

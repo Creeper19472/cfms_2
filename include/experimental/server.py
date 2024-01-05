@@ -79,6 +79,11 @@ class ThreadedSocketServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         if exc_type in (ProgrammedSystemExit, HandshakeError):
             return
         
+        if exc_type == ConnectionAbortedError:
+            self.logger.info(f"{client_address}: Connection aborted")
+        elif exc_type == ConnectionResetError:
+            self.logger.info(f"{client_address}: Connection reset")
+        
         return super().handle_error(request, client_address)
     
 
@@ -760,7 +765,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
             "getRootDir": optdir.handle_getRootDir,
             # "getPolicy": optpolicy.handle_getPolicy,
             "getAvatar": auth.handle_getAvatar, 
-            # "createFile": self.handle_createFile,
+            "createFile": optfile.handle_createFile,
             # "createUser": self.handle_createUser,
             # "createDir": self.handle_createDir,
             # "createGroup": self.handle_createGroup,
