@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "240106_alpha")
+CORE_VERSION = (1, 0, 0, "240107_alpha")
 READABLE_VERSION = (
     f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
 )

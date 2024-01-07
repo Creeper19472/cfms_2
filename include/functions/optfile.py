@@ -813,7 +813,7 @@ def handle_createFile(instance, loaded_recv, user: Users):
 
         # 创建任务
         task_id, task_token, t_filenames, expire_time = createFileTask(
-            (index_file_id,), operation="write", username=user.username
+            instance, (index_file_id,), operation="write", username=user.username
         )
 
         mapped_dict = convertFile2PathID(
@@ -838,3 +838,107 @@ def handle_createFile(instance, loaded_recv, user: Users):
     del dboptr
 
     return
+
+def handle_getFileRevisions(instance, loaded_recv, user: Users):
+    try:
+        file_id: str = loaded_recv["data"]["file_id"]
+        view_deleted: bool = bool(loaded_recv["data"].get("view_deleted", False))
+        reverse: bool = bool(
+            loaded_recv["data"].get("reverse", True)
+        )  # 反序，默认开启 - 按从新到旧排序
+        item_range: tuple[int, int] = tuple(
+            loaded_recv["data"].get("item_range", ())
+        )
+    except KeyError:
+        instance.respond(**instance.RES_MISSING_ARGUMENT)
+        return
+
+    # 判断文件是否存在
+    if not instance._hasFileRecord(file_id):
+        instance.respond(**instance.RES_NOT_FOUND)
+        return
+
+    if not instance.verifyUserAccess(file_id, "read", user):  # 目前仅要求用户具有 read 权限，未来可能细化
+        instance.respond(**instance.RES_ACCESS_DENIED)
+        return
+
+    if view_deleted:
+        if not user.hasRights(("view_deleted",)):
+            instance.respond(**instance.RES_ACCESS_DENIED)
+            return
+
+    if not item_range:
+        item_range = (0, 10)
+
+    if (
+        len(item_range) != 2
+        or not isinstance(item_range[0], int)
+        or not isinstance(item_range[1], int)
+        or item_range[0] > item_range[1]
+        or item_range < (0, 1)
+    ):  # item_range 必须前者小于后者，如需倒序使用 reverse 函数
+        instance.respond(400, msg="invaild range syntax")
+        return
+
+    if (max_count := item_range[1] - item_range[0]) > 50:
+        instance.respond(
+            400, msg="max revision count out of range"
+        )
+        return
+
+    with DatabaseOperator(instance._pool) as dboptr:
+
+        dboptr[1].execute(
+            "SELECT `type`, `revisions` FROM path_structures WHERE `id` = ?", (file_id,)
+        )
+        query_result = dboptr[1].fetchone()
+
+    if not query_result:
+        instance.respond(**instance.RES_NOT_FOUND)
+        return
+
+    if query_result[0] != "file":
+        instance.respond(-1, msg="not a file")
+        return
+
+    query_revisions = json.loads(query_result[1])
+
+    # 开始剔除不可用 revisions
+
+    # 排序
+    sorted_revisions: list[tuple] = sorted(
+        query_revisions.items(), key=lambda i: i[1]["time"], reverse=reverse
+    )
+
+    final_revisions = {}
+
+    revisions_count = len(sorted_revisions)
+
+    _i = 0  # 总的循环次数，不能大于 revisions_count
+    _k = 0  # 成功的次数，不应大于 max_count
+
+    while _i < revisions_count and _k < (
+        max_count if max_count <= revisions_count else revisions_count
+    ):
+        _i += 1  # _i 加了1，此时才正确表示本次循环的序号
+
+        per_revision = sorted_revisions[item_range[0] + _i - 1]
+
+        if per_revision[1]["state"]["code"] == "deleted" and not view_deleted:
+            continue
+
+        this_revision_id, this_revision_data = per_revision
+
+        if instance._verifyAccess(
+            user,
+            "read",
+            this_revision_data["access_rules"],
+            this_revision_data["external_access"],
+        ):
+            final_revisions[this_revision_id] = this_revision_data
+            _k += 1
+
+    instance.respond(
+        0, msg="ok", data={"revisions": final_revisions}
+    )
+

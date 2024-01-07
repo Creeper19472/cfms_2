@@ -27,7 +27,8 @@ from include.bulitin_class.users import Users
 
 from include.database.operator import DatabaseOperator
 
-from include.modules import auth, optfile, optdir
+from include.functions import auth, optfile, optdir, optpol
+from include.logtool import getCustomLogger
 
 class HandshakeError(Exception):
     pass
@@ -46,6 +47,12 @@ class ThreadedSocketServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
         self.root_abspath = os.path.abspath("") # 获取当前绝对路径。根据该函数实现方法，应当返回工作目录
         self.config = server_config
+
+        # 同样为 SocketServer 申请 logger
+        self.logger = getCustomLogger(
+            logname=f"main.socketserver",
+            filepath=f"{self.root_abspath}/main.log",
+        )
 
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
 
@@ -81,8 +88,10 @@ class ThreadedSocketServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         
         if exc_type == ConnectionAbortedError:
             self.logger.info(f"{client_address}: Connection aborted")
+            return
         elif exc_type == ConnectionResetError:
             self.logger.info(f"{client_address}: Connection reset")
+            return
         
         return super().handle_error(request, client_address)
     
@@ -761,16 +770,16 @@ class SocketHandler(socketserver.BaseRequestHandler):
             "refreshToken": auth.handle_refreshToken,
             "operateFile": optfile.handle_operateFile,
             "operateDir": optdir.handle_operateDir,
-            # "operateUser": self.handle_operateUser,
+            "operateUser": auth.handle_operateUser,
             "getRootDir": optdir.handle_getRootDir,
-            # "getPolicy": optpolicy.handle_getPolicy,
+            "getPolicy": optpol.handle_getPolicy,
             "getAvatar": auth.handle_getAvatar, 
             "createFile": optfile.handle_createFile,
             # "createUser": self.handle_createUser,
             # "createDir": self.handle_createDir,
             # "createGroup": self.handle_createGroup,
-            # "getUserProperties": self.handle_getUserProperties,
-            # "getFileRevisions": self.handle_getFileRevisions,
+            "getUserProperties": auth.handle_getUserProperties,
+            "getFileRevisions": optfile.handle_getFileRevisions,
             "shutdown": self.handle_shutdown,
         }
 
