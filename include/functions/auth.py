@@ -157,7 +157,7 @@ def handle_getUserProperties(instance, loaded_recv, user: Users):
         "properties": query_user_object.properties,
     }
 
-    instance.respond(**response)
+    instance.respond(0, **response)
     return
 
 def handle_operateUser(instance, loaded_recv, user: Users):
@@ -375,3 +375,84 @@ def handle_operateUser(instance, loaded_recv, user: Users):
 
         else:
             instance.respond(**instance.RES_BAD_REQUEST)
+
+def handle_createUser(instance, loaded_recv, user: Users):
+    if "data" not in loaded_recv:
+        instance.respond(**instance.RES_MISSING_ARGUMENT)
+        return
+
+    new_usr_username = loaded_recv["data"].get("username", None)
+    new_usr_pwd = loaded_recv["data"].get("password", None)
+
+    new_usr_nickname = loaded_recv["data"].get("nickname", new_usr_username)
+
+    if not new_usr_username or not new_usr_pwd:
+        instance.respond(**instance.RES_MISSING_ARGUMENT)
+        return
+
+    # 检查长度是否合法
+    if len(new_usr_username) > 32:  # max 255
+        instance.respond(**{"code": -1, "msg": "username too long"})
+        return
+    if len(new_usr_nickname) > 64:
+        instance.respond(**{"code": -1, "msg": "user nickname too long"})
+        return
+
+    if not user.hasRights(("create_user",)):
+        instance.respond(**instance.RES_ACCESS_DENIED)
+        return
+
+    with DatabaseOperator(instance._pool) as dboptr:
+
+        # 判断用户是否存在
+        new_user = Users(new_usr_username, *dboptr)
+        if new_user.ifExists():
+            instance.respond(**{"code": -1, "msg": "user exists"})
+            return
+
+        new_usr_rights = loaded_recv["data"].get("rights", None)
+        new_usr_groups = loaded_recv["data"].get("groups", None)
+
+        auth_policy = Policies("user_auth", *dboptr)
+
+        if new_usr_groups != None or new_usr_rights != None:
+            if not user.hasRights(("custom_new_user_settings",)):
+                instance.respond(**instance.RES_ACCESS_DENIED)
+                return
+
+        if new_usr_groups == None:  # fallback
+            new_usr_groups = auth_policy["default_new_user_groups"]
+        if new_usr_rights == None:
+            new_usr_rights = auth_policy["default_new_user_rights"]
+
+        # 随机生成8位salt
+        alphabet = string.ascii_letters + string.digits
+        salt = "".join(secrets.choice(alphabet) for i in range(8))  # 安全化
+
+        __first = hashlib.sha256(new_usr_pwd.encode()).hexdigest()
+        __second_obj = hashlib.sha256()
+        __second_obj.update((__first + salt).encode())
+
+        salted_pwd = __second_obj.hexdigest()
+
+        insert_user = (
+            new_usr_username,
+            salted_pwd,
+            salt,
+            new_usr_nickname,
+            json.dumps(new_usr_rights),
+            json.dumps(new_usr_groups),
+            json.dumps(auth_policy["default_new_user_properties"]),
+            None,  # publickey
+        )
+
+        dboptr[1].execute(
+            "INSERT INTO `users` VALUES(?, ?, ?, ?, ?, ?, ?, ?)", insert_user
+        )
+
+        dboptr[0].commit()
+
+    del dboptr
+    instance.respond(**instance.RES_OK)
+
+    return

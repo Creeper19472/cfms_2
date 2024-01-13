@@ -87,7 +87,7 @@ def permanentlyDeleteFile(instance, fake_path_id):  # TODO #15 更新操作至�
 
             # 移除所有传输任务列表
 
-            fq_db = sqlite3.connect(f"{instance.root_abspath}/content/fqueue.db")
+            fq_db = sqlite3.connect(f"{instance.server.root_abspath}/content/fqueue.db")
             fq_cur = fq_db.cursor()
 
             fq_cur.execute(

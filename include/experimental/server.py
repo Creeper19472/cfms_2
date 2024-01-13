@@ -3,6 +3,7 @@
 
 from functools import wraps
 import gettext
+import secrets
 import socket
 import socketserver
 import json
@@ -13,6 +14,7 @@ import sys
 import threading
 import time
 import tomllib
+import traceback
 import rsa
 from typing import Any, Self
 
@@ -27,7 +29,7 @@ from include.bulitin_class.users import Users
 
 from include.database.operator import DatabaseOperator
 
-from include.functions import auth, optfile, optdir, optpol
+from include.functions import auth, optfile, optdir, optgroup, optpol
 from include.logtool import getCustomLogger
 
 class HandshakeError(Exception):
@@ -93,7 +95,7 @@ class ThreadedSocketServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
             self.logger.info(f"{client_address}: Connection reset")
             return
         
-        return super().handle_error(request, client_address)
+        self.logger.fatal(f"Exception occurred during processing of request from {client_address}:", exc_info=True)
     
 
 
@@ -332,45 +334,55 @@ class SocketHandler(socketserver.BaseRequestHandler):
             self.trace_id = None # 置空 
 
             try:
-                recv = self.recv()
-            except ValueError:  # Wrong IV, etc.
                 try:
-                    self.send("?")
-                except:
-                    raise
-                continue
-            except ConnectionAbortedError:
-                self.logger.info(f"{self.client_address}: Connection aborted")
-                return
-            except ConnectionResetError:
-                self.logger.info(f"{self.client_address}: Connection reset")
-                return
+                    recv = self.recv()
+                except ValueError:  # Wrong IV, etc.
+                    self.respond(**self.RES_BAD_REQUEST)
+                    continue
+
+                try:
+                    loaded_recv = json.loads(recv)
+                except Exception as e:
+                    self.logger.debug(f"Error when loading recv: {e}")
+                    self.send(json.dumps({"code": -1, "msg": "invaild request format"}))
+                    continue
+
+                client_api_version = loaded_recv.get("version", None)
+
+                # 判断 API 版本
+                if not client_api_version:
+                    self.send(json.dumps({"code": -1, "msg": "API version is not given"}))
+                    continue
+
+                if client_api_version == 1:
+                    self.handle_v1(loaded_recv)
+                else:  # 目前仅支持 V1
+                    self.send(json.dumps({"code": -1, "msg": "unsupported API version"}))
+                    continue
+
+
+            except (ConnectionAbortedError, ConnectionResetError):
+                raise
             except TimeoutError:
                 self.logger.info(
                     f"{self.client_address}: Connection timed out. Disconnecting."
                 )
                 return
+            except:
+
+                exc_log_id = self.trace_id if self.trace_id else secrets.token_hex(8)
+
+                self.logger.error(f"[{exc_log_id}] Error occurred when handling the request of {self.client_address}:", exc_info=True)
+
+                e_type, e_value, e_traceback = sys.exc_info()
+                self.respond(500, msg="Internal Server Error", exc_info={
+                    "exc_id": exc_log_id, # self.trace_id if exists, else a randomized 8-letter string
+                    "exc_type": str(e_type),
+                    "exc_value": str(e_value) if self.server.config["debug"]["show_exc_details"] else None,
+                    "exc_traceback": traceback.format_exc() if self.server.config["debug"]["show_exc_details"] else None
+                })
+                continue
             # print(f"recv: {recv}")
-
-            try:
-                loaded_recv = json.loads(recv)
-            except Exception as e:
-                self.logger.debug(f"Error when loading recv: {e}")
-                self.send(json.dumps({"code": -1, "msg": "invaild request format"}))
-                continue
-
-            client_api_version = loaded_recv.get("version", None)
-
-            # 判断 API 版本
-            if not client_api_version:
-                self.send(json.dumps({"code": -1, "msg": "API version is not given"}))
-                continue
-
-            if client_api_version == 1:
-                self.handle_v1(loaded_recv)
-            else:  # 目前仅支持 V1
-                self.send(json.dumps({"code": -1, "msg": "unsupported API version"}))
-                continue
 
         # 当跳出上述循环，即代表处理过程终止
         
@@ -775,9 +787,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
             "getPolicy": optpol.handle_getPolicy,
             "getAvatar": auth.handle_getAvatar, 
             "createFile": optfile.handle_createFile,
-            # "createUser": self.handle_createUser,
-            # "createDir": self.handle_createDir,
-            # "createGroup": self.handle_createGroup,
+            "createUser": auth.handle_createUser,
+            "createDir": optdir.handle_createDir,
+            "createGroup": optgroup.handle_createGroup,
             "getUserProperties": auth.handle_getUserProperties,
             "getFileRevisions": optfile.handle_getFileRevisions,
             "shutdown": self.handle_shutdown,
@@ -785,8 +797,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
         # 定义了需要传入 Users 对象的函数列表。用于判断使用。
         # External User Objects
-        outfile_requests = (
-            "refreshToken", 
+        outfile_requests = ( 
             "operateFile", 
             "operateDir", 
             "getRootDir", 
@@ -800,6 +811,8 @@ class SocketHandler(socketserver.BaseRequestHandler):
             "getUserProperties",
             "getFileRevisions",
             )
+        
+        excluded_requests = ("refreshToken",)
 
         given_request = loaded_recv["request"]
 
@@ -823,14 +836,19 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
                     user.load()
 
+
                     available_requests[given_request](self, loaded_recv, user=user)
+                    
 
                     ### 结束
 
                     del user
 
             else:
-                available_requests[given_request](loaded_recv)
+                if given_request in excluded_requests:
+                    available_requests[given_request](self, loaded_recv)
+                else:
+                    available_requests[given_request](loaded_recv)
         else:
             self.respond(-1, msg="unknown request")
 
@@ -839,6 +857,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
         self.this_time_username = None  # 置空
 
     def handle_login(self, req_username, req_password):
+
         # 初始化用户对象 User()
         with DatabaseOperator(self._pool) as couple:
 

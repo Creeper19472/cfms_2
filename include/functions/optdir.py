@@ -1,4 +1,5 @@
 from collections import UserList
+import secrets
 from include.bulitin_class.policies import Policies
 from include.bulitin_class.users import Users
 from include.connThread import PendingWriteFileError
@@ -228,7 +229,7 @@ def handle_operateDir(instance, loaded_recv, user: Users):
             instance.respond(**{"code": 0, "dir_data": dir_result})
 
         elif action == "delete":
-            recycle_policy = Policies("recycle", dboptr)
+            recycle_policy = Policies("recycle", *dboptr)
             delete_after_marked_time = recycle_policy["deleteAfterMarked"]
 
             if dir_state["code"] == "deleted":
@@ -242,8 +243,8 @@ def handle_operateDir(instance, loaded_recv, user: Users):
                 )
                 return
 
-            succeeded, failed = instance.deleteDir(
-                dir_id, user, delete_after=delete_after_marked_time
+            succeeded, failed = deleteDir(
+                instance, dir_id, user, delete_after=delete_after_marked_time
             )
 
             if failed:
@@ -289,7 +290,7 @@ def handle_operateDir(instance, loaded_recv, user: Users):
                 (new_dirname, dir_id),
             )
 
-            instance.db_conn.commit()
+            dboptr[0].commit()
 
             instance.respond(**{"code": 0, "msg": "success"})
 
@@ -298,7 +299,7 @@ def handle_operateDir(instance, loaded_recv, user: Users):
                 instance.respond(**{"code": -1, "msg": "Directory is not deleted"})
                 return
 
-            succeeded, failed = instance.recoverDir(dir_id, user)
+            succeeded, failed = recoverDir(instance, dir_id, user)
 
             if failed:
                 response_code = -3  # 请求已经完成，但有错误
@@ -421,3 +422,238 @@ def handle_operateDir(instance, loaded_recv, user: Users):
 
     else:
         instance.respond(**instance.RES_BAD_REQUEST)
+
+def handle_createDir(instance, loaded_recv, user: Users):
+    if "data" not in loaded_recv:
+        instance.respond(**instance.RES_MISSING_ARGUMENT)
+        return
+
+    if not user.hasRights(("create_dir",)):  # 鉴权
+        instance.respond(**instance.RES_ACCESS_DENIED)
+        return
+
+    target_parent_id = loaded_recv["data"].get(
+        "parent_id", ""
+    )  # fallback to rootdir
+    target_id = loaded_recv["data"].get("dir_id", None)
+    new_dirname = loaded_recv["data"].get("name", None)
+
+    if not new_dirname:
+        instance.respond(**instance.RES_MISSING_ARGUMENT)
+        return
+
+    if target_id:  # 自动生成
+        if len(target_id) > 64:
+            instance.respond(**{"code": -1, "msg": "directory id too long"})
+            return
+    else:
+        target_id = secrets.token_hex(16)
+
+    ### 从这里继续
+        
+    with DatabaseOperator(instance._pool) as dboptr:
+
+        dboptr[1].execute(
+            "SELECT 1 FROM path_structures WHERE `id` = ?", (target_id,)
+        )
+
+        query_result = dboptr[1].fetchall()
+
+        if query_result:
+            instance.respond(
+               
+                **{
+                    "code": -1,
+                    "msg": "file or directory exists.",
+                    "__hint__": "if you want to override a directory, use 'operateDir' instead.",
+                }
+
+            )
+            return
+
+        del query_result  # 清除
+
+        if target_parent_id:  # 如果不是根目录
+            dboptr[1].execute(
+                "SELECT `type` FROM path_structures WHERE `id` = ?", (target_parent_id,)
+            )
+
+            dir_query_result = dboptr[1].fetchall()
+
+            if not dir_query_result:
+                instance.respond(
+                    **{"code": 404, "msg": "target directory not found"}
+                )
+                return
+            elif len(dir_query_result) > 1:
+                raise RuntimeError("数据库出现了不止一条同id的记录")
+
+            if (d_id_type := dir_query_result[0][0]) != "dir":
+                instance.logger.debug(
+                    f"用户试图请求在 id 为 {target_parent_id} 的目录下创建子目录，\
+                                    但它事实上不是一个目录（{d_id_type}）"
+                )
+                instance.respond(**{"code": -1, "msg": "not a directory"})
+                return
+
+            if not instance.verifyUserAccess(target_parent_id, "write", user):
+                instance.respond(**instance.RES_ACCESS_DENIED)
+                return
+
+        else:
+            por_policy = Policies("permission_on_rootdir", *dboptr)
+
+            por_access_rules = por_policy["rules"]["access_rules"]
+            por_external_access = por_policy["rules"]["external_access"]
+
+            if not instance._verifyAccess(
+                user, "write", por_access_rules, por_external_access, True
+            ):
+                instance.logger.debug("用户无权访问根目录")
+                instance.respond(**instance.RES_ACCESS_DENIED)
+                return
+            else:
+                instance.logger.debug("根目录鉴权成功")
+
+        # 开始创建文件夹
+
+        # 注册数据库条目
+
+        dboptr[1].execute(
+            "INSERT INTO path_structures \
+                                (`id` , `name`, `owner` , `parent_id` , `type` , `revisions` , `access_rules`, `external_access`, `properties`, `state`) \
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            (
+                target_id,
+                new_dirname,
+                json.dumps((("user", user.username),)),
+                target_parent_id,
+                "dir",
+                None,
+                r"{}",
+                r"{}",
+                json.dumps({"created_time": time.time()}),
+                json.dumps({"code": "ok", "expire_time": 0}),
+            ),
+        )
+
+        dboptr[0].commit()
+
+        instance.respond(
+            **{"code": 0, "msg": "directory created", "data": {"dir_id": target_id}}
+        )
+
+        return
+
+def deleteDir(instance, dir_id, user: Users, delete_after=0, dboptr: DatabaseOperator = None):
+
+    if not dboptr:
+        dboptr = DatabaseOperator(instance._pool)
+
+    completed_list = []
+    failed_list = []
+
+    new_state = {"code": "deleted", "expire_time": time.time() + delete_after}
+
+    # 判断是否有权限
+
+    # 遍历下级文件夹
+    dboptr[1].execute(
+        'SELECT `id` FROM path_structures WHERE `parent_id` = ? AND `type` = "dir";',
+        (dir_id,),
+    )
+
+    query_subs_result = dboptr[1].fetchall()
+
+    for i in query_subs_result:
+        sub_result = deleteDir(instance, i[0], user, dboptr=dboptr)
+
+        completed_list += sub_result[0]
+        failed_list += sub_result[1]
+
+    # 获取本级列表
+    dboptr[1].execute(
+        "SELECT `id` FROM path_structures WHERE `parent_id` = ?", (dir_id,)
+    )
+    query_result = dboptr[1].fetchall()
+
+    for i in query_result:
+        if not instance.verifyUserAccess(i[0], "delete", user):
+            failed_list.append(i[0])
+        else:
+            # 删除该目录的直系子级文件和目录
+            dboptr[1].execute(
+                "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
+                (json.dumps(new_state), i[0]),
+            )
+            completed_list.append(i[0])
+
+    if not failed_list:  # 仅当删除下级文件未出现错误时才删除目录
+        dboptr[1].execute(
+            "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
+            (json.dumps(new_state), dir_id),
+        )
+        completed_list.append(dir_id)
+    else:
+        failed_list.append(dir_id)
+
+    dboptr[0].commit()
+
+    del dboptr
+
+    return completed_list, failed_list
+
+def recoverDir(instance, dir_id, user: Users, dboptr: DatabaseOperator = None):
+    # 注意：前后两个函数都不对用户是否有该文件夹权限做判断，应在 handle 部分完成
+
+    if not dboptr:
+        dboptr = DatabaseOperator(instance._pool)
+
+    completed_list = []
+    failed_list = []
+
+    new_state = {"code": "ok", "expire_time": 0}
+
+    # 判断是否有权限
+
+    # 遍历下级文件夹
+    dboptr[1].execute(
+        'SELECT `id` FROM path_structures WHERE `parent_id` = ? AND `type` = "dir";',
+        (dir_id,),
+    )
+
+    query_subs_result = dboptr[1].fetchall()
+
+    for i in query_subs_result:
+        sub_result = recoverDir(instance, i[0], user, dboptr)
+
+        completed_list += sub_result[0]
+        failed_list += sub_result[1]
+
+    # 获取本级列表
+    dboptr[1].execute(
+        "SELECT `id` FROM path_structures WHERE `parent_id` = ?", (dir_id,)
+    )
+    query_result = dboptr[1].fetchall()
+
+    for i in query_result:
+        if not instance.verifyUserAccess(i[0], "recover", user):
+            failed_list.append(i[0])
+        else:
+            # 恢复该目录的直系子级文件和目录
+            dboptr[1].execute(
+                "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
+                (json.dumps(new_state), i[0]),
+            )
+            completed_list.append(i[0])
+
+    # 无论是否全部恢复成功都恢复此目录
+    dboptr[1].execute(
+        "UPDATE path_structures SET `state` = ? WHERE `id` = ?;",
+        (json.dumps(new_state), dir_id),
+    )
+    completed_list.append(dir_id)
+
+    dboptr[0].commit()
+
+    return completed_list, failed_list
