@@ -331,7 +331,11 @@ class SocketHandler(socketserver.BaseRequestHandler):
         while not self.server.is_requested_shutdown.is_set():
             # self.server.shutdown_request()
 
-            self.trace_id = None # 置空 
+            self.trace_id = None # 置空
+
+            """
+            X-Ca-Timestamp、X-Ca-Nonce
+            """
 
             try:
                 try:
@@ -381,6 +385,8 @@ class SocketHandler(socketserver.BaseRequestHandler):
                     "exc_value": str(e_value) if self.server.config["debug"]["show_exc_details"] else None,
                     "exc_traceback": traceback.format_exc() if self.server.config["debug"]["show_exc_details"] else None
                 })
+
+                del exc_log_id, e_traceback, e_type, e_value
                 continue
             # print(f"recv: {recv}")
 
@@ -720,6 +726,25 @@ class SocketHandler(socketserver.BaseRequestHandler):
         if "trace_id" in loaded_recv:
             self.trace_id = loaded_recv["trace_id"]
 
+        # Replay attack fix
+        if not self.trace_id:
+            self.respond(**self.RES_BAD_REQUEST)
+            return
+        
+        try:
+            request_timestamp: float = loaded_recv["X-Ca-Timestamp"]
+            request_nonce = loaded_recv["X-Ca-Nonce"]
+        except KeyError:
+            self.respond(400, msg="X-Ca-Timestamp or X-Ca-Nonce is not provided")
+            return
+
+        if time.time() - 300 > request_timestamp: # 300 秒误差范围
+            self.respond(400, msg="X-Ca-Timestamp out of allowed range")
+            return
+        
+        # if request_nonce in used_nonces:
+        #     pass
+
         if loaded_recv["request"] == "login":
             try:
                 req_username = loaded_recv["data"].get("username", "")
@@ -956,6 +981,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
         return
 
 if __name__ == "__main__":
+
     HOST, PORT = "localhost", 9999
 
     with open("config.toml", "rb") as f:
