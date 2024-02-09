@@ -23,36 +23,34 @@ def handle_refreshToken(instance, loaded_recv):
     old_token = loaded_recv["auth"]["token"]
     req_username = loaded_recv["auth"]["username"]
 
-    with DatabaseOperator(instance._pool) as couple:
+    user = instance.all_users[req_username]
+    
+    # 读取 token_secret
+    with open(f"{instance.server.root_abspath}/content/auth/token_secret", "r") as ts_file:
+        token_secret = ts_file.read()
 
-        user = Users(req_username, *couple)  # 初始化用户对象
-        # 读取 token_secret
-        with open(f"{instance.server.root_abspath}/content/auth/token_secret", "r") as ts_file:
-            token_secret = ts_file.read()
-
-        if new_token := user.refreshUserToken(
-            old_token, token_secret, vaild_time=3600
-        ):  # return: {token} , False
-            instance.respond(0, **{"msg": "ok", "token": new_token})
-        else:
-            instance.respond(401, msg="invaild token or username")
+    if new_token := user.refreshUserToken(
+        old_token, token_secret, vaild_time=3600
+    ):  # return: {token} , False
+        instance.respond(0, **{"msg": "ok", "token": new_token})
+    else:
+        instance.respond(401, msg="invaild token or username")
 
 def handle_getAvatar(instance, loaded_recv, user: Users):
     if not (avatar_username := loaded_recv["data"].get("username")):
         instance.respond(**{"code": -1, "msg": "needs a username"})
         return
     
-    with DatabaseOperator(instance._pool) as dboptr: 
-        get_avatar_user = Users(avatar_username, *dboptr)
+    if not avatar_username in instance.all_users:
+        instance.logger.debug(
+            f"用户 {user.username} 试图请求帐户 {avatar_username} 的头像，但这个用户并不存在。"
+        )
+        instance.respond(**{"code": 404, "msg": "not found"})
+        return
+    
+    get_avatar_user = instance.all_users[avatar_username]
 
-        if not get_avatar_user.ifExists():
-            instance.logger.debug(
-                f"用户 {user.username} 试图请求帐户 {avatar_username} 的头像，但这个用户并不存在。"
-            )
-            instance.respond(**{"code": 404, "msg": "not found"})
-            return
-        
-
+    with DatabaseOperator(instance._pool) as dboptr:
         avatar_policy = Policies("avatars", *dboptr)
 
         gau_access_rules = get_avatar_user["publicity"].get("access_rules", {})
@@ -66,7 +64,7 @@ def handle_getAvatar(instance, loaded_recv, user: Users):
                         user, "read", gau_access_rules, gau_external_access
                     )
                 )
-                and (not user.hasRights(("super_useravatar",)))
+                and (not "super_useravatar" in user.rights)
             ):
                 instance.respond(403, msg="forbidden")
                 return
@@ -138,15 +136,15 @@ def handle_getUserProperties(instance, loaded_recv, user: Users):
         target_username = user.username  # fallback to whoami
 
     if target_username != user.username:
-        if not user.hasRights(("view_others_properties",)):
+        if not "view_others_properties" in user.rights:
             instance.respond(**instance.RES_ACCESS_DENIED)
             return
 
-        with DatabaseOperator(instance._pool) as dboptr:
-            query_user_object = Users(target_username, *dboptr)
-            if not query_user_object.ifExists():
-                instance.respond(**instance.RES_NOT_FOUND)
-                return
+        if not target_username in instance.all_users:
+            instance.respond(**instance.RES_NOT_FOUND)
+            return
+        
+        query_user_object = instance.all_users[target_username]
 
     else:
         query_user_object = user
@@ -154,7 +152,7 @@ def handle_getUserProperties(instance, loaded_recv, user: Users):
     response = {
         "rights": list(query_user_object.rights),
         "groups": list(query_user_object.groups),
-        "properties": query_user_object.properties,
+        # "properties": query_user_object.properties,
     }
 
     instance.respond(0, **response)
@@ -176,21 +174,20 @@ def handle_operateUser(instance, loaded_recv, user: Users):
         instance.respond(-1, msg="need a username")
 
     elif username != user.username and action != "get_publickey":
-        if not user.hasRights(("edit_other_users",)):
+        if not "edit_other_users" in user.rights:
             instance.respond(**instance.RES_ACCESS_DENIED)
             return
 
     with DatabaseOperator(instance._pool) as dboptr:
-        dest_user = Users(username, *dboptr)
-
-        if not dest_user.ifExists():
+        
+        if not username in instance.all_users:
             instance.respond(404, msg="user not found")
             return
 
-        dest_user.load()
+        dest_user = instance.all_users[username]
 
-        user_properties = dest_user.properties
-        user_state = user_properties["state"]
+        # user_properties = dest_user.properties
+        user_state: int = dest_user.state
 
         if action in [
             "set_nickname",
@@ -206,7 +203,7 @@ def handle_operateUser(instance, loaded_recv, user: Users):
             # 因为这里的操作不是路径操作，故只能手动鉴权
 
             if action == "set_nickname":
-                if not user.hasRights(("set_nickname",)):
+                if not "set_nickname" in user.rights:
                     instance.respond(**instance.RES_ACCESS_DENIED)
                     return
 
@@ -224,7 +221,7 @@ def handle_operateUser(instance, loaded_recv, user: Users):
                 return
 
             elif action == "delete":
-                if not user.hasRights(("delete_user",)):
+                if not "delete_user" in user.rights:
                     instance.respond(**instance.RES_ACCESS_DENIED)
                     return
 
@@ -256,6 +253,8 @@ def handle_operateUser(instance, loaded_recv, user: Users):
                 return
 
             elif action == "set_publickey":  # incomplete - does not support device_id
+                raise NotImplementedError
+
                 new_publickey = loaded_recv["data"].get("publickey", None)
                 if not new_publickey:
                     instance.respond(**instance.RES_MISSING_ARGUMENT)
@@ -277,8 +276,9 @@ def handle_operateUser(instance, loaded_recv, user: Users):
                 return
 
             elif action == "get_publickey":
+                raise NotImplementedError
                 if user.username != dest_user.username:
-                    if not user.hasRights(("view_others_publickey",)):
+                    if not "view_others_publickey" in user.rights:
                         instance.respond(**instance.RES_ACCESS_DENIED)
                         return
 
@@ -326,7 +326,7 @@ def handle_operateUser(instance, loaded_recv, user: Users):
                 return
 
             elif action == "set_groups":
-                if not user.hasRights(("set_usergroups",)):
+                if not "set_usergroups" in user.rights:
                     instance.respond(**instance.RES_ACCESS_DENIED)
                     return
 
@@ -350,7 +350,7 @@ def handle_operateUser(instance, loaded_recv, user: Users):
                 instance.respond(**instance.RES_OK)
 
             elif action == "set_rights":
-                if not user.hasRights(("set_userrights",)):
+                if not "set_userrights" in user.rights:
                     instance.respond(**instance.RES_ACCESS_DENIED)
                     return
 
@@ -398,15 +398,14 @@ def handle_createUser(instance, loaded_recv, user: Users):
         instance.respond(**{"code": -1, "msg": "user nickname too long"})
         return
 
-    if not user.hasRights(("create_user",)):
+    if not "create_user" in user.rights:
         instance.respond(**instance.RES_ACCESS_DENIED)
         return
 
     with DatabaseOperator(instance._pool) as dboptr:
 
         # 判断用户是否存在
-        new_user = Users(new_usr_username, *dboptr)
-        if new_user.ifExists():
+        if new_usr_username in instance.all_users:
             instance.respond(**{"code": -1, "msg": "user exists"})
             return
 
@@ -416,7 +415,7 @@ def handle_createUser(instance, loaded_recv, user: Users):
         auth_policy = Policies("user_auth", *dboptr)
 
         if new_usr_groups != None or new_usr_rights != None:
-            if not user.hasRights(("custom_new_user_settings",)):
+            if not "custom_new_user_settings" in user.rights:
                 instance.respond(**instance.RES_ACCESS_DENIED)
                 return
 

@@ -25,7 +25,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
 from include.bulitin_class.policies import Policies
-from include.bulitin_class.users import Users
+from include.bulitin_class.users import AllUsers, Users
 
 from include.database.operator import DatabaseOperator
 
@@ -122,6 +122,8 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
     RES_BAD_REQUEST = {"code": 400, "msg": "bad request"}
 
+    RES_DUPLICATE_PACK = {"code": 400, "msg": "invaild nonce: duplicate pack?"}
+
 
     def __init__(self, request, client_address, server: ThreadedSocketServer) -> None:
 
@@ -129,7 +131,11 @@ class SocketHandler(socketserver.BaseRequestHandler):
         self.client_address = client_address
         self.server = server
 
+        self.config = self.server.config # patch
+
         self._pool = self.server._pool
+
+        self.all_users = AllUsers(self._pool)
 
         # RSA 传输相关过程
         self.pri_cipher = None
@@ -531,18 +537,21 @@ class SocketHandler(socketserver.BaseRequestHandler):
     ):
         if not access_rules:  # fix #7
             return True  # fallback
+        
+        # print(access_rules)
 
-        if user.hasRights(("super_access",)):
+        if "super_access" in user.rights:
             return True  # 放行超级权限，避免管理员被锁定在外
 
         # 确认是否满足 deny 规则
         if check_deny:
             # print(access_rules)
+            # print()
             all_deny_rules = access_rules.get("deny", {})
 
             this_action_deny_value = all_deny_rules.get(action, {})
-            # print(this_action_deny_value)
 
+            # print(this_action_deny_value)
             this_deny_groups = this_action_deny_value.get("groups", {})
             this_deny_users = this_action_deny_value.get("users", {})
             this_deny_rules = this_action_deny_value.get("rules", [])
@@ -575,7 +584,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
                     return False
 
         # access_rules 包括所有规则
-        if user.ifMatchRules(access_rules[action]):
+        if user.ifMatchRules(access_rules.get(action, [])):
             return True
 
         if external_access:
@@ -585,7 +594,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
                 if (not (expire_time := i_dict[action].get("expire", 0))) or (
                     expire_time >= time.time()
                 ):  # 如果用户组拥有的权限尚未到期
-                    if user.hasGroups((i,)):  # 如果用户存在于此用户组
+                    if i in user.groups:  # 如果用户存在于此用户组
                         return True
 
             if user.username in external_access["users"].keys():  # 如果用户在字典中有记录
@@ -724,7 +733,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
         self.logger.debug("handle_v1() 函数被调用")
 
         if "trace_id" in loaded_recv:
-            self.trace_id = loaded_recv["trace_id"]
+            self.trace_id = loaded_recv["trace_id"] # 准备合并
 
         # Replay attack fix
         if not self.trace_id:
@@ -733,12 +742,11 @@ class SocketHandler(socketserver.BaseRequestHandler):
         
         try:
             request_timestamp: float = loaded_recv["X-Ca-Timestamp"]
-            request_nonce = loaded_recv["X-Ca-Nonce"]
         except KeyError:
-            self.respond(400, msg="X-Ca-Timestamp or X-Ca-Nonce is not provided")
+            self.respond(400, msg="X-Ca-Timestamp is not provided")
             return
 
-        if time.time() - 300 > request_timestamp: # 300 秒误差范围
+        if (time.time() - 300 > request_timestamp) or (time.time() + 300 < request_timestamp): # +-300 秒误差范围
             self.respond(400, msg="X-Ca-Timestamp out of allowed range")
             return
         
@@ -818,7 +826,11 @@ class SocketHandler(socketserver.BaseRequestHandler):
             "getUserProperties": auth.handle_getUserProperties,
             "getFileRevisions": optfile.handle_getFileRevisions,
             "shutdown": self.handle_shutdown,
+            # "emergency": None
         }
+
+        for i in self.server.config["security"]["disabled_functions"]:
+            del available_requests[i]
 
         # 定义了需要传入 Users 对象的函数列表。用于判断使用。
         # External User Objects
@@ -844,30 +856,23 @@ class SocketHandler(socketserver.BaseRequestHandler):
         if given_request in available_requests:
             if given_request in outfile_requests:
 
-                # 实际是照搬装饰器的逻辑
-                with DatabaseOperator(self._pool) as couple:
+                user = self.all_users[self.this_time_username]
 
-                    user = Users(self.this_time_username, *couple)
+                # 读取 token_secret
+                with open(f"{self.server.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                    token_secret = ts_file.read()
 
-                    # 读取 token_secret
-                    with open(f"{self.server.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                        token_secret = ts_file.read()
+                if not user.isVaildToken(self.this_time_token, token_secret):
+                    self.respond(
+                        **{"code": -1, "msg": "invaild token or username"}
+                    )
+                    return
 
-                    if not user.ifVaildToken(self.this_time_token, token_secret):
-                        self.respond(
-                            **{"code": -1, "msg": "invaild token or username"}
-                        )
-                        return
+                available_requests[given_request](self, loaded_recv, user=user)
 
-                    user.load()
+                ### 结束
 
-
-                    available_requests[given_request](self, loaded_recv, user=user)
-                    
-
-                    ### 结束
-
-                    del user
+                del user
 
             else:
                 if given_request in excluded_requests:
@@ -886,11 +891,12 @@ class SocketHandler(socketserver.BaseRequestHandler):
         # 初始化用户对象 User()
         with DatabaseOperator(self._pool) as couple:
 
-            user = Users(req_username, *couple)
-            if user.ifExists():
-                if user.ifMatchPassword(req_password):  # actually hash
+            if req_username in self.all_users:
+
+                user = self.all_users[req_username]
+
+                if user.isMatchPassword(req_password):  # actually hash
                     self.logger.info(f"{req_username} 密码正确，准予访问")
-                    user.load()  # 载入用户信息
 
                     # 读取 token_secret
                     with open(
@@ -946,31 +952,27 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
             # 验证 token
 
-            with DatabaseOperator(self._pool) as couple:
+            user = self.all_users[self.this_time_username]
 
-                user = Users(self.this_time_username, *couple)
+            # 读取 token_secret
+            with open(f"{self.server.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                token_secret = ts_file.read()
 
-                # 读取 token_secret
-                with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
-                    token_secret = ts_file.read()
+            if not user.isVaildToken(self.this_time_token, token_secret):
+                self.respond(
+                    **{"code": -1, "msg": "invaild token or username"}
+                )
+                return
 
-                if not user.ifVaildToken(self.this_time_token, token_secret):
-                    self.respond(
-                        **{"code": -1, "msg": "invaild token or username"}
-                    )
-                    return
+            ### 结束
 
-                user.load()
-
-                ### 结束
-
-                func(self, *args, **kwargs, user=user)  # 仅当上述操作成功该函数才会被执行
+            func(self, *args, **kwargs, user=user)  # 仅当上述操作成功该函数才会被执行
 
         return _wrapper
     
     @userOperationAuthWrapper
     def handle_shutdown(self, loaded_recv, user: Users):
-        if not user.hasRights(("shutdown",)):
+        if not "shutdown" in user.rights:
             self.respond(**self.RES_ACCESS_DENIED)
             return
 

@@ -129,7 +129,7 @@ def handle_operateFile(instance, loaded_recv, user: Users):
         view_deleted = True  # 若要恢复文件，则必须有权访问被删除的文件
 
     if view_deleted:  # 如果启用 view_deleted 选项
-        if not user.hasRights(("view_deleted",)):
+        if not "view_deleted" in user.rights:
             instance.respond(**instance.RES_ACCESS_DENIED)
             return
 
@@ -543,7 +543,7 @@ def handle_operateFile(instance, loaded_recv, user: Users):
             return
 
         elif req_action == "change_id":
-            if not user.hasRights(("change_id",)):
+            if not "change_id" in user.rights:
                 instance.respond(**instance.RES_ACCESS_DENIED)
                 return
 
@@ -863,7 +863,7 @@ def handle_getFileRevisions(instance, loaded_recv, user: Users):
         return
 
     if view_deleted:
-        if not user.hasRights(("view_deleted",)):
+        if not "view_deleted" in user.rights:
             instance.respond(**instance.RES_ACCESS_DENIED)
             return
 

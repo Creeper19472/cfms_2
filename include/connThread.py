@@ -872,7 +872,7 @@ class ConnHandler:
             with open(f"{self.root_abspath}/content/auth/token_secret", "r") as ts_file:
                 token_secret = ts_file.read()
 
-            if not user.ifVaildToken(self.this_time_token, token_secret):
+            if not user.isVaildToken(self.this_time_token, token_secret):
                 self.__send(
                     json.dumps({"code": -1, "msg": "invaild token or username"})
                 )

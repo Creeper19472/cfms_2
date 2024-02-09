@@ -24,7 +24,7 @@ def handle_getRootDir(instance, loaded_recv, user: Users):
         view_deleted = loaded_recv["data"].get("view_deleted", False)
 
         if view_deleted:  # 如果启用 view_deleted 选项
-            if not user.hasRights(("view_deleted",)):
+            if not "view_deleted" in user.rights:
                 instance.respond(**instance.RES_ACCESS_DENIED)
                 return
 
@@ -55,7 +55,7 @@ def handle_getRootDir(instance, loaded_recv, user: Users):
                     continue
 
             if not instance.verifyUserAccess(i[0], "read", user):  # 检查该目录下的文件是否有权访问，如无则隐藏
-                if instance.config["security"]["hide_when_no_access"]:
+                if instance.server.config["security"]["hide_when_no_access"]:
                     continue
                 else:
                     pass
@@ -99,7 +99,7 @@ def handle_operateDir(instance, loaded_recv, user: Users):
         view_deleted = True  # 若要恢复文件，则必须有权访问被删除的文件
 
     if view_deleted:  # 如果启用 view_deleted 选项
-        if not user.hasRights(("view_deleted",)):
+        if not "view_deleted" in user.rights:
             instance.respond(**instance.RES_ACCESS_DENIED)
             return
 
@@ -379,7 +379,7 @@ def handle_operateDir(instance, loaded_recv, user: Users):
             return
 
         elif action == "change_id":
-            if not user.hasRights(("change_id",)):
+            if not "change_id" in user.rights:
                 instance.respond(**instance.RES_ACCESS_DENIED)
                 return
 
@@ -428,7 +428,7 @@ def handle_createDir(instance, loaded_recv, user: Users):
         instance.respond(**instance.RES_MISSING_ARGUMENT)
         return
 
-    if not user.hasRights(("create_dir",)):  # 鉴权
+    if not "create_dir" in user.rights:  # 鉴权
         instance.respond(**instance.RES_ACCESS_DENIED)
         return
 

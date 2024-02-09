@@ -22,7 +22,7 @@ def handle_createGroup(instance, loaded_recv, user: Users):
         instance.respond(**instance.RES_MISSING_ARGUMENT)
         return
 
-    if not user.hasRights(("create_group",)):
+    if not "create_group" in user.rights:
         instance.respond(**instance.RES_ACCESS_DENIED)
         return
 
@@ -43,12 +43,12 @@ def handle_createGroup(instance, loaded_recv, user: Users):
         group_policy = Policies("group_settings", *dboptr)
 
         if new_group_rights != None or new_group_enabled != None:  # 不为未提供的，因提供空列表也是一种提交
-            if not user.hasRights(("custom_new_group_settings",)):
+            if not "custom_new_group_settings" in user.rights:
                 instance.respond(**instance.RES_ACCESS_DENIED)
                 return
 
         if new_group_members != None:
-            if not user.hasRights(("custom_new_group_members",)):
+            if not "custom_new_group_members" in user.rights:
                 instance.respond(**instance.RES_ACCESS_DENIED)
                 return
 

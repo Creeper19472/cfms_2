@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "240116_alpha")
+CORE_VERSION = (1, 0, 0, "240209_alpha")
 READABLE_VERSION = (
     f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
 )
@@ -12,7 +12,9 @@ import logging
 import sys, os, json, socket, sqlite3, gettext, time, random, threading
 import tomllib
 import hashlib
-import socketserver  # 准备切到 socketserver
+import socketserver
+from include.database.operator import DatabaseOperator
+from include.initialize_scripts.initialize import initDatabaseStructure  # 准备切到 socketserver
 import include.logtool as logtool
 from include.connThread import *
 from Crypto.PublicKey import RSA
@@ -655,7 +657,7 @@ if __name__ == "__main__":
             (_mysql_db_name,),
         )
     if not m_cur.fetchone():
-        dbInit(maindb)
+        initDatabaseStructure(db_pool)
 
     maindb.close()
 

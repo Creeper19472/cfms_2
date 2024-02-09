@@ -1,146 +1,102 @@
 # builtin_class/Users.py
 
 import secrets
-import sqlite3
 import hashlib
-from typing import Union
 import jwt
 import time
-import json
 
-from mysql.connector.connection import MySQLConnection
-from mysql.connector.cursor import MySQLCursorPrepared
-
-from deepdiff import DeepDiff
-
-class Users(object):
-    def __init__(self, username, db_conn: Union[sqlite3.Connection, MySQLConnection], \
-                 db_cursor: Union[sqlite3.Cursor, MySQLCursorPrepared], autoload=True, **kwargs):
-        self.username = username
-        self.db_conn = db_conn
-        self.db_cursor = db_cursor
-        self.rights = set()
-        self.groups = set()
-        self.properties = {}
-        self._original_properties = {}
-
-        self.publickey = None # str
-        
-        if autoload:
-            self.load() # by default, in order to avoid mistakes
-
-    def __getitem__(self, key):
-        return self.properties[key]
-    
-    def __setitem__(self, key, value):
-        self.properties[key] = value
-    
-    def __contains__(self, item):
-        return item in self.properties
-
-    def load(self):
-        if not self.ifExists():
-            return
-
-        self.db_cursor.execute("SELECT `rights`, `groups`, `properties`, `publickey` from `users` where `username` = ?", (self.username,))
-        result = self.db_cursor.fetchone()
-
-        self.rights = set() # 重置
-        self.groups = set()
-
-        self.properties = json.loads(result[2])
-        self._original_properties = self.properties # copy
-
-        self.publickey = result[3]
-
-        for i in (loaded_result := json.loads(result[0])):
-            if (not (expire_time:=loaded_result[i].get("expire", 0))) or (expire_time > time.time()):
-                if not loaded_result[i].get("revoke", False):
-                    self.rights.add(i)
-                else:
-                    self.rights - {i,} # remove
-
-        for j in (loaded_result := json.loads(result[1])):
-             if (not (expire_time:=loaded_result[j].get("expire", 0))) or (expire_time > time.time()):
-                self.groups.add(j)
-                # 组不支持 revoke，因为无意义
-
-        del loaded_result
-
-        self.groups.add("user") # deafult and forced group
-
-        for per_group in self.groups:
-
-            self.db_cursor.execute("SELECT `rights`, `enabled` from `groups` where `name` = ?", (per_group, ))
-            per_result = self.db_cursor.fetchone()
-            if per_result[1]:
-                for i in (per_group_rights := json.loads(per_result[0])):
-                    if (not (expire_time:=per_group_rights[i].get("expire", 0))) or (expire_time > time.time()):
-                        if not per_group_rights[i].get("revoke", False):
-                            self.rights.add(i)
-                        else:
-                            self.rights - {i,} # remove
+from include.database.operator import DatabaseOperator
 
 
-    def save_properties(self, diff_mode=True, allow_new_keys=False) -> None: # 危险，不要随便调用
-        # diff 更新模式，仅对第一层作比较
-        if diff_mode:
-            # Properties
-            diff_properties = {}
-            for i in self.properties:
-                if not i in self._original_properties and not allow_new_keys:
-                    raise KeyError("不允许插入新的键")
-                else:
-                    diff_properties[i] = self.properties[i]
+class AllUsers:
+    def __init__(self, db_pool):
+        self._db_pool = db_pool
 
-                if self.properties[i] != self._original_properties[i]:
-                    diff_properties[i] = self.properties[i]
-
-            
+    def __getitem__(self, username):
+        if username in self:
+            return Users(username, self._db_pool)
         else:
-            diff_properties = self.properties
+            raise KeyError("No such user")
 
-        self.db_cursor.execute("SELECT `properties` FROM `users` WHERE `username` = ?;", \
-                            (self.username,))
-        query_properties =self.db_cursor.fetchone()[0]
+    def __contains__(self, username):
+        with DatabaseOperator(self._db_pool) as dboptr:
+            dboptr[1].execute(
+                "SELECT count(`username`) FROM `users` WHERE `username` = ?",
+                (username,),
+            )
+            _result = dboptr[1].fetchall()
+        del dboptr  # 清理
 
-        insert_properties = query_properties
+        return bool(_result)
 
-        for i in diff_properties:
-            if not i in query_properties or diff_properties[i] != query_properties[i]:
-                query_properties[i] = diff_properties[i]
 
-        self.db_cursor.execute("UPDATE `users` SET `properties` = ? WHERE `username` = ?", (json.dumps(diff_properties), self.username))
-        self.db_conn.commit()
-         
+class Users:
+    def __init__(self, username: str, db_pool):
+        self._db_pool = db_pool
 
-        return
+        with DatabaseOperator(self._db_pool) as dboptr:
+            dboptr[1].execute(
+                "SELECT `user_id`, `password`, `salt`, `nickname`, `status`, \
+                    `last_login`, `created_time` FROM `users` WHERE `username` = ?",
+                (username,),
+            )
 
-    def ifExists(self):
-        # 可能注入的位点
-        self.db_cursor.execute("SELECT count(`username`) from `users` where `username` = ?", (self.username,))
-        result = self.db_cursor.fetchone()
-        if result[0] == 1:
-            return True
-        elif result[0] > 1:
-            raise
-        else:
-            return False
+            _result = dboptr[1].fetchone()  # 不考虑多个结果的情况
 
-    def ifMatchPassword(self, given):
-        prelist = []
-        prelist.append(self.username)
-        self.db_cursor.execute("SELECT `hash`, `salt` from `users` where `username` = ?", tuple(prelist))
+            (
+                self.user_id,
+                self.password,
+                self.pwd_salt,
+                self.nickname,
+                self.status,
+                self.last_login,
+                self.created_time,
+            ) = _result
 
-        hash, salt = self.db_cursor.fetchone()
-        # 初始化sha256对象
+            self.username = username
+
+            # 载入权限和用户组
+            dboptr[1].execute(
+                "SELECT `perm_name`, `perm_type`, `mode` FROM `user_permissions` WHERE `user_id` = ? AND (`expire_time` > ? OR `expire_time` < 0)",
+                (self.user_id, time.time()),
+            )
+            _perms = dboptr[1].fetchall()
+
+            self.rights = set()
+            self.groups = set()
+
+            _revoked_rights = set()
+
+            for each_perm in _perms:
+                if each_perm[1] == "right":
+                    if each_perm[2] == "granted":
+                        self.rights.add(each_perm[0])
+                    elif each_perm[2] == "revoked":
+                        _revoked_rights.add(each_perm[0])
+                    else:
+                        raise RuntimeError(
+                            f"Invaild mode for right {each_perm[0]}: {each_perm[2]}"
+                        )
+                elif each_perm[1] == "group":
+                    if each_perm[2] == "granted":
+                        self.groups.add(each_perm[0])
+                    else:
+                        raise RuntimeError(
+                            f"Invaild mode for group {each_perm[0]}: {each_perm[2]}"
+                        )
+                else:
+                    raise RuntimeError(f"Invaild permission type: {each_perm[1]}")
+
+            self.rights -= _revoked_rights
+
+            # 载入 metadata - TODO
+
+    def isMatchPassword(self, pwd_to_compare):
         sha256_obj = hashlib.sha256()
-        sha256_obj.update((given+salt).encode())
-        if secrets.compare_digest(hash, sha256_obj.hexdigest()):
-            return True
-        else:
-            return False
-        
+        sha256_obj.update((pwd_to_compare + self.pwd_salt).encode())
+
+        return secrets.compare_digest(self.password, sha256_obj.hexdigest())
+
     def generateUserToken(self, can_be_used: tuple, vaild_time: int, secret):
         now_time = int(time.time())
         expire_time = now_time + vaild_time
@@ -148,65 +104,41 @@ class Users(object):
             "exp": expire_time,
             "nbf": now_time,
             "sub": self.username,
-            "can_be_used" : can_be_used
-            }
+            "can_be_used": can_be_used,
+        }
         encoded = jwt.encode(payload, secret, algorithm="HS256")
         return encoded
-    
-    def refreshUserToken(self, old_token, secret, vaild_time = 3600):
-        if self.ifVaildToken(old_token, secret, leeway=60):
-            return self.generateUserToken(("all"), vaild_time, secret) # todo: 传入 can_be_used
+
+    def refreshUserToken(self, old_token, secret, vaild_time=3600):
+        if self.isVaildToken(old_token, secret, leeway=60):
+            return self.generateUserToken(
+                ("all"), vaild_time, secret
+            )  # todo: 传入 can_be_used
         else:
             return False
-        
-    def ifVaildToken(self, given_token, secret, leeway=0): # 针对于这个用户而言的
+
+    def isVaildToken(self, given_token, secret, leeway=0):  # 针对于这个用户而言的
         try:
-            decoded = jwt.decode(given_token, secret, leeway=leeway, algorithms=["HS256"], options={"require": ["exp", "sub"]})
+            decoded = jwt.decode(
+                given_token,
+                secret,
+                leeway=leeway,
+                algorithms=["HS256"],
+                options={"require": ["exp", "sub"]},
+            )
         except jwt.ExpiredSignatureError:
             return False
-        except: # fallback
-            return False
-        if decoded["sub"] == self.username:
-            if not self.ifExists():
-                return False
-            return True
-        else:
+        except:  # fallback
             return False
 
-
-    def hasRight(self, right=None): # hasRights() is recommended
-        if not right: # 若未给定权限名，则返回为真
-            return True
-        if right in self.rights:
-            return True
-        else:
-            return False
-
-    def hasRights(self, rights=()):
-        if not rights: # 若未给定权限名，则返回为真
-            return True
-        for i in rights:
-            if not i in self.rights:
-                return False
-        return True
-    
-    def hasGroups(self, groups=()):
-        if not groups:
-            return True
-        for i in groups:
-            if not i in self.groups:
-                return False
-        return True
+        return decoded["sub"] == self.username
 
     def ifMatchRequirements(self, rules: list):
-
-        user = self # alias
-
 
         def matchRights(sub_rights_group):
             if not sub_rights_group:
                 return True
-            
+
             sub_match_mode = sub_rights_group.get("match", "all")
             sub_rights_require = sub_rights_group.get("require", [])
 
@@ -214,20 +146,21 @@ class Users(object):
                 return True
 
             if sub_match_mode == "all":
-                return user.hasRights(sub_rights_require)
+                return set(sub_rights_require) <= self.rights
 
             elif sub_match_mode == "any":
-                
+
                 for right in sub_rights_require:
-                    if user.hasRight(right):
+                    if right in self.rights:
                         return True
-                return False # fallback
+                return False  # fallback
+
             else:
                 raise
 
         def matchGroups(sub_groups_group):
             if not sub_groups_group:
-                return True # if no content, return True
+                return True  # if no content, return True
 
             sub_match_mode = sub_groups_group.get("match", "all")
             sub_groups_require = sub_groups_group.get("require", [])
@@ -236,27 +169,27 @@ class Users(object):
                 return True
 
             if sub_match_mode == "all":
-                return user.hasGroups(sub_groups_require)
+                return set(sub_groups_require) <= self.groups
 
             elif sub_match_mode == "any":
                 for group in sub_groups_require:
-
-                    if user.hasGroups((group,)):
+                    if group in self.groups:
                         return True
-                
-                return False # fallback
+
+                return False  # fallback
             else:
                 raise
 
-
-        def matchSubGroup(sub_group): # TODO #6 fix
+        def matchSubGroup(sub_group):  # TODO #6 fix
 
             sub_match_mode = sub_group.get("match", "all")
 
             sub_rights_group = sub_group.get("rights", {})
             sub_groups_group = sub_group.get("groups", {})
 
-            if not (sub_rights_group.get("require",[])) or (not sub_groups_group.get("require", [])):
+            if not (sub_rights_group.get("require", [])) or (
+                not sub_groups_group.get("require", [])
+            ):
                 sub_match_mode = "all"
 
             if sub_match_mode == "any":
@@ -272,15 +205,14 @@ class Users(object):
                     return False
             else:
                 raise ValueError(r'the value of "match" must be "all" or "any"')
-            
+
         def matchPrimarySubGroup(per_match_group):
-            match_mode = per_match_group.get("match", "all") # fallback: all
+            match_mode = per_match_group.get("match", "all")  # fallback: all
             for sub_group in per_match_group["match_groups"]:
                 if not sub_group:
                     continue
 
                 state = matchSubGroup(sub_group)
-                
 
                 if match_mode == "any":
                     if state:
@@ -293,73 +225,18 @@ class Users(object):
             if match_mode == "any":
                 return False
             elif match_mode == "all":
-                return True 
-            
+                return True
+
         if not rules:
             return True
 
         for per_match_group in rules:
-            if not per_match_group: # quick judgement
-                continue # for case {}
+            if not per_match_group:  # quick judgement
+                continue  # for case {}
 
             if not matchPrimarySubGroup(per_match_group):
                 return False
-        
+
         return True
-                    
+
     ifMatchRules = ifMatchRequirements
-                    
-
-                    
-                
-
-
-if __name__ == "__main__":
-    maindb = sqlite3.connect(f"B:\crp9472_personal\cfms_2/general.db")
-    user_admin = Users("admin", maindb)
-    print(user_admin.ifExists())
-    print(user_admin.ifMatchPassword("00aa"))
-    can_do = ("all", "generate")
-    token = user_admin.generateUserToken(can_do, 3600 , "secret")
-    print(token)
-    user_admin.load()
-    # print(user_admin.rights)
-    # print(user_admin.groups) # users 不显示
-    # print(user_admin.hasGroups(["user"]))
-
-    test_rules = [ # 列表，并列满足 与 条件
-        {
-            "match": "any",
-            "match_groups": [ # 下级匹配组，满足 any 条件 => True
-                {
-                    "match": "any",
-                    "rights": {
-                        "match": "any",
-                        "require": ["read"]
-                    },
-                    "groups": {
-                        "match": "any",
-                        "require": ["sysop"]
-                    }
-                }
-            ]
-        }, 
-        {
-            "match": "all",
-            "match_groups": [
-                {
-                    "match": "any",
-                    "rights": {
-                        "match": "any",
-                        "require": ["root", "a"]
-                    }
-                }
-            ]
-        }, 
-    ]
-
-
-    # print(user_admin.hasGroups(["user", "sysop", "readers"]))
-    print(user_admin.groups)
-    print(user_admin.rights)
-    print(user_admin.ifMatchRules(test_rules))
