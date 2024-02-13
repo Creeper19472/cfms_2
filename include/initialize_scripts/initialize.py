@@ -44,14 +44,14 @@ def initDatabaseStructure(db_pool):
     # columns: user_id, perm_name, perm_type, mode, expire_time
 
     dboptr[1].execute(
-        "CREATE TABLE user_permissions (`user_id` BIGINT PRIMARY KEY, `perm_name` varchar(255), \
+        "CREATE TABLE user_permissions (`user_id` BIGINT, `perm_name` varchar(255), \
             `perm_type` varchar(64), `mode` varchar(64), `expire_time` INT);"
     )
 
     ### user_metadata
     # columns: user_id, key, value, created_time, modified_time
     dboptr[1].execute(
-        "CREATE TABLE user_metadata (`user_id` BIGINT PRIMARY KEY, `key` varchar(255), \
+        "CREATE TABLE user_metadata (`user_id` BIGINT, `key` varchar(255), \
             `value` text, `created_time` INT, `modified_time` INT);"
     )
 
@@ -62,14 +62,14 @@ def initDatabaseStructure(db_pool):
     # 创建用户组表及其初始数据
 
     dboptr[1].execute(
-        "CREATE TABLE `groups` (`id` BIGINT PRIMARY KEY AUTO_INCREMENT, `g_id` VARCHAR(255), `group_name` TEXT, `status` INT"
+        "CREATE TABLE `groups` (`id` BIGINT PRIMARY KEY AUTO_INCREMENT, `g_id` VARCHAR(255), `group_name` TEXT, `status` INT);"
     )
     dboptr[1].execute(
-        "CREATE TABLE `group_rights` (`id` BIGINT PRIMARY KEY, `right` TEXT, `mode` VARCHAR(255), `expire_time` INT"
+        "CREATE TABLE `group_rights` (`id` BIGINT, `right` TEXT, `mode` VARCHAR(255), `expire_time` INT);"
     )
 
     dboptr[1].execute(
-        "CREATE TABLE group_metadata (`id` BIGINT PRIMARY KEY, `key` varchar(255), \
+        "CREATE TABLE `group_metadata` (`id` BIGINT, `key` varchar(255), \
             `value` text, `created_time` INT, `modified_time` INT);"
     )
 

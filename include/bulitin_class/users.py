@@ -24,10 +24,10 @@ class AllUsers:
                 "SELECT count(`username`) FROM `users` WHERE `username` = ?",
                 (username,),
             )
-            _result = dboptr[1].fetchall()
+            _result = dboptr[1].fetchone()
         del dboptr  # 清理
 
-        return bool(_result)
+        return bool(_result[0])
 
 
 class Users:
@@ -93,9 +93,9 @@ class Users:
             # 载入用户组所包含的权限
                 
             for i in self.groups:
-                
+
                 dboptr[1].execute(
-                    "SELECT `right`, `mode` FROM `group_rights` WHERE `group_id` = ? AND (`expire_time` > ? OR `expire_time` <= 0)",
+                    "SELECT `right`, `mode` FROM `group_rights` WHERE `group_id` = ? AND (`expire_time` > ? OR `expire_time` <= 0) AND `groups`.`status` = 0",
                     (i, time.time()),
                 )
                 _rights = dboptr[1].fetchall()

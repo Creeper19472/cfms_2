@@ -136,7 +136,7 @@ def createGroup(group_id: str, group_name: str = None,
     if same_g_id_count:
         raise RuntimeError("group exists")
     
-    dboptr[1].execute("INSERT INTO `groups` (`g_id`, `group_name`, `status`) VALUES (?, ?, ?)", (group_id, group_name, ))
+    dboptr[1].execute("INSERT INTO `groups` (`g_id`, `group_name`, `status`) VALUES (?, ?, ?)", (group_id, group_name, status))
     
     group_row_id = dboptr[1].lastrowid
 
