@@ -14,19 +14,23 @@ import json
 from include.util.convert import convertFile2PathID
 from include.util.filetasks import createFileTask
 from include.util.structurecheck import StructureValidater
+from include.util.usertools import createUser
 
 
 def handle_logout(instance):
     pass
+
 
 def handle_refreshToken(instance, loaded_recv):
     old_token = loaded_recv["auth"]["token"]
     req_username = loaded_recv["auth"]["username"]
 
     user = instance.all_users[req_username]
-    
+
     # 读取 token_secret
-    with open(f"{instance.server.root_abspath}/content/auth/token_secret", "r") as ts_file:
+    with open(
+        f"{instance.server.root_abspath}/content/auth/token_secret", "r"
+    ) as ts_file:
         token_secret = ts_file.read()
 
     if new_token := user.refreshUserToken(
@@ -36,18 +40,19 @@ def handle_refreshToken(instance, loaded_recv):
     else:
         instance.respond(401, msg="invaild token or username")
 
+
 def handle_getAvatar(instance, loaded_recv, user: Users):
     if not (avatar_username := loaded_recv["data"].get("username")):
         instance.respond(**{"code": -1, "msg": "needs a username"})
         return
-    
+
     if not avatar_username in instance.all_users:
         instance.logger.debug(
             f"用户 {user.username} 试图请求帐户 {avatar_username} 的头像，但这个用户并不存在。"
         )
         instance.respond(**{"code": 404, "msg": "not found"})
         return
-    
+
     get_avatar_user = instance.all_users[avatar_username]
 
     with DatabaseOperator(instance._pool) as dboptr:
@@ -79,7 +84,6 @@ def handle_getAvatar(instance, loaded_recv, user: Users):
             mapped_dict = convertFile2PathID(t_filenames, mapping)
 
             instance.respond(
-                
                 **{
                     "code": 0,
                     "msg": "ok",
@@ -89,7 +93,6 @@ def handle_getAvatar(instance, loaded_recv, user: Users):
                         "t_filename": mapped_dict,
                     },
                 }
-            
             )
         else:
             if default_avatar_id := avatar_policy["default_avatar"]:
@@ -106,7 +109,6 @@ def handle_getAvatar(instance, loaded_recv, user: Users):
                 )
 
                 instance.respond(
-                
                     **{
                         "code": 0,
                         "msg": "ok",
@@ -117,13 +119,13 @@ def handle_getAvatar(instance, loaded_recv, user: Users):
                             "expire_time": expire_time,
                         },
                     }
-                
                 )
             else:
                 instance.logger.debug(
                     f"用户 {user.username} 试图请求帐户 {avatar_username} 的头像，但用户未设置头像，且策略指定的默认头像为空。"
                 )
                 instance.respond(**{"code": 404, "msg": "not found", "data": {}})
+
 
 def handle_getUserProperties(instance, loaded_recv, user: Users):
     if "data" not in loaded_recv:
@@ -143,7 +145,7 @@ def handle_getUserProperties(instance, loaded_recv, user: Users):
         if not target_username in instance.all_users:
             instance.respond(**instance.RES_NOT_FOUND)
             return
-        
+
         query_user_object = instance.all_users[target_username]
 
     else:
@@ -157,6 +159,7 @@ def handle_getUserProperties(instance, loaded_recv, user: Users):
 
     instance.respond(0, **response)
     return
+
 
 def handle_operateUser(instance, loaded_recv, user: Users):
 
@@ -179,7 +182,7 @@ def handle_operateUser(instance, loaded_recv, user: Users):
             return
 
     with DatabaseOperator(instance._pool) as dboptr:
-        
+
         if not username in instance.all_users:
             instance.respond(404, msg="user not found")
             return
@@ -226,12 +229,14 @@ def handle_operateUser(instance, loaded_recv, user: Users):
                     return
 
                 if dest_user.username == user.username:
-                    instance.respond(**
-                        {"code": -1, "msg": "a user cannot delete itself"}
+                    instance.respond(
+                        **{"code": -1, "msg": "a user cannot delete itself"}
                     )
                     return
 
-                ft_conn = sqlite3.connect(f"{instance.server.root_abspath}/content/fqueue.db")
+                ft_conn = sqlite3.connect(
+                    f"{instance.server.root_abspath}/content/fqueue.db"
+                )
                 ft_cursor = ft_conn.cursor()
 
                 # 删除任务, 留下已完成的任务供查证
@@ -283,8 +288,8 @@ def handle_operateUser(instance, loaded_recv, user: Users):
                         return
 
                 if dest_user.publickey:
-                    instance.respond(**
-                        {
+                    instance.respond(
+                        **{
                             "code": 0,
                             "msg": "ok",
                             "data": {"publickey": dest_user.publickey},
@@ -292,8 +297,8 @@ def handle_operateUser(instance, loaded_recv, user: Users):
                     )
 
                 else:
-                    instance.respond(**
-                        {"code": 404, "msg": "the user does not have a publickey"}
+                    instance.respond(
+                        **{"code": 404, "msg": "the user does not have a publickey"}
                     )
 
             elif action == "passwd":
@@ -337,9 +342,7 @@ def handle_operateUser(instance, loaded_recv, user: Users):
                     return
 
                 if not StructureValidater.checkGroupStructure(new_groups)[0]:
-                    instance.respond(**
-                        {"code": -1, "msg": "invaild data structure"}
-                    )
+                    instance.respond(**{"code": -1, "msg": "invaild data structure"})
                     return
 
                 dboptr[1].execute(
@@ -361,9 +364,7 @@ def handle_operateUser(instance, loaded_recv, user: Users):
                     return
 
                 if not StructureValidater.checkRightStructure(new_rights)[0]:
-                    instance.respond(**
-                        {"code": -1, "msg": "invaild data structure"}
-                    )
+                    instance.respond(**{"code": -1, "msg": "invaild data structure"})
                     return
 
                 dboptr[1].execute(
@@ -375,6 +376,7 @@ def handle_operateUser(instance, loaded_recv, user: Users):
 
         else:
             instance.respond(**instance.RES_BAD_REQUEST)
+
 
 def handle_createUser(instance, loaded_recv, user: Users):
     if "data" not in loaded_recv:
@@ -424,32 +426,14 @@ def handle_createUser(instance, loaded_recv, user: Users):
         if new_usr_rights == None:
             new_usr_rights = auth_policy["default_new_user_rights"]
 
-        # 随机生成8位salt
-        alphabet = string.ascii_letters + string.digits
-        salt = "".join(secrets.choice(alphabet) for i in range(8))  # 安全化
-
-        __first = hashlib.sha256(new_usr_pwd.encode()).hexdigest()
-        __second_obj = hashlib.sha256()
-        __second_obj.update((__first + salt).encode())
-
-        salted_pwd = __second_obj.hexdigest()
-
-        insert_user = (
+        createUser(
             new_usr_username,
-            salted_pwd,
-            salt,
+            new_usr_pwd,
             new_usr_nickname,
-            json.dumps(new_usr_rights),
-            json.dumps(new_usr_groups),
-            json.dumps(auth_policy["default_new_user_properties"]),
-            None,  # publickey
+            user_granted_rights=new_usr_rights,
+            user_groups=new_usr_groups,
+            all_users=instance.all_users
         )
-
-        dboptr[1].execute(
-            "INSERT INTO `users` VALUES(?, ?, ?, ?, ?, ?, ?, ?)", insert_user
-        )
-
-        dboptr[0].commit()
 
     del dboptr
     instance.respond(**instance.RES_OK)

@@ -4,8 +4,11 @@ from include.bulitin_class.policies import Policies
 from include.bulitin_class.users import Users
 from include.database.operator import DatabaseOperator
 
+FALL_DEFAULT = type
 
 def handle_createGroup(instance, loaded_recv, user: Users):
+    raise NotImplementedError # TODO
+
     if "data" not in loaded_recv:
         instance.respond(**instance.RES_MISSING_ARGUMENT)
         return
