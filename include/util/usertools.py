@@ -113,3 +113,49 @@ def createUser(username: str, password: str, nickname=None,
         dboptr[0].commit() # 在这里提交，意味着给定的 dboptr 最好是“干净”的
 
     return
+
+def createGroup(group_id: str, group_name: str = None, 
+               group_granted_rights: dict = {}, group_revoked_rights: dict = {},
+               status: int = 0,
+               dboptr: DatabaseOperator = None):
+    if not dboptr:
+        raise NotImplementedError("Cannot function without DatabaseOperator")
+    
+    if not group_name:
+        group_name = group_id
+    
+    if len(group_id) > 32:  # (technically) max 255
+        raise ValueError("group_id too long")
+
+    if len(group_name) > 64:  # max 255
+        raise ValueError("group_name too long")
+    
+    dboptr[1].execute("SELECT count(`g_id`) FROM `groups` WHERE `g_id` = ?", (group_id,))
+    same_g_id_count = dboptr[1].fetchone()[0]
+
+    if same_g_id_count:
+        raise RuntimeError("group exists")
+    
+    dboptr[1].execute("INSERT INTO `groups` (`g_id`, `group_name`, `status`) VALUES (?, ?, ?)", (group_id, group_name, ))
+    
+    group_row_id = dboptr[1].lastrowid
+
+    # 逐条插入权限设定
+
+    insert_rights = []
+
+    for right in group_granted_rights:
+        insert_rights.append((group_row_id, right, "granted", group_granted_rights[right]))
+
+    for right in group_revoked_rights:
+        insert_rights.append((group_row_id, right, "revoked", group_revoked_rights[right]))
+                            
+    dboptr[1].executemany(
+        "INSERT INTO `group_rights` (`id`, `right`, `mode`, `expire_time`) \
+            VALUES(?, ?, ?, ?)", insert_rights
+    )
+
+    dboptr[0].commit() # 在这里提交，意味着给定的 dboptr 最好是“干净”的
+
+    return
+

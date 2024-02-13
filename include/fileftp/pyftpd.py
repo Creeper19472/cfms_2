@@ -224,8 +224,8 @@ class DummyMD5Authorizer(DummyAuthorizer):
             file_id, fake_id = i[0], i[1]
 
             # 查询
-            g_cursor.execute("SELECT `abspath` FROM document_indexes WHERE `id` = ?", (file_id,))
-            real_file_path = g_cursor.fetchone()[0]
+            g_cursor.execute("SELECT `path` FROM document_indexes WHERE `id` = ?", (file_id,))
+            real_file_path = ROOT_ABSPATH + g_cursor.fetchone()[0]
 
             if real_file_path:
 
@@ -252,7 +252,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
                             shutil.copyfile(real_file_abspath, f"{fake_abspath}/{fake_id}")
 
             else:
-                raise sqlite3.DatabaseError("document_indexes 应当记录文件的绝对路径，但它为空")
+                raise sqlite3.DatabaseError("document_indexes 应当记录文件的相对路径，但它为空")
         
         ### 初始化部分结束
 
@@ -324,6 +324,3 @@ def main(root_abspath, shutdown_event: threading.Event, addr: tuple, locks: dict
     
     server.close_all()
     sys.exit()
-
-if __name__ == "__main__":
-    main("B:\crp9472_personal\cfms_2", shutdown_event=threading.Event()) #TODO

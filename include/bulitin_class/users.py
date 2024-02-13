@@ -57,7 +57,7 @@ class Users:
 
             # 载入权限和用户组
             dboptr[1].execute(
-                "SELECT `perm_name`, `perm_type`, `mode` FROM `user_permissions` WHERE `user_id` = ? AND (`expire_time` > ? OR `expire_time` < 0)",
+                "SELECT `perm_name`, `perm_type`, `mode` FROM `user_permissions` WHERE `user_id` = ? AND (`expire_time` > ? OR `expire_time` <= 0)",
                 (self.user_id, time.time()),
             )
             _perms = dboptr[1].fetchall()
@@ -86,10 +86,50 @@ class Users:
                         )
                 else:
                     raise RuntimeError(f"Invaild permission type: {each_perm[1]}")
+                
+            # 默认包含 user 组
+            self.groups.add("user")
+
+            # 载入用户组所包含的权限
+                
+            for i in self.groups:
+                
+                dboptr[1].execute(
+                    "SELECT `right`, `mode` FROM `group_rights` WHERE `group_id` = ? AND (`expire_time` > ? OR `expire_time` <= 0)",
+                    (i, time.time()),
+                )
+                _rights = dboptr[1].fetchall()
+
+                _group_revoked_rights = set()
+
+                for each_right in _rights:
+                    if each_right[1] == "granted":
+                        self.rights.add(each_perm[0])
+                    elif each_right[1] == "revoked":
+                        _group_revoked_rights.add(each_perm[0])
+                    else:
+                        raise RuntimeError(
+                            f"Invaild mode for right {each_perm[0]} of group {i}: {each_perm[1]}"
+                        )
 
             self.rights -= _revoked_rights
+            self.rights -= _group_revoked_rights
+            
 
             # 载入 metadata - TODO
+
+    def getMetadata(self, key: str) -> str:
+        with DatabaseOperator(self._db_pool) as dboptr:
+            dboptr[1].execute(
+                "SELECT `value` FROM `user_metadata` WHERE `user_id` = ? AND `key` = ?",
+                (self.user_id, key),
+            )
+            _result = dboptr[1].fetchone()
+
+        if not _result:
+            raise KeyError("No such key")
+        else:
+            return _result[0]
 
     def isMatchPassword(self, pwd_to_compare):
         sha256_obj = hashlib.sha256()
@@ -107,6 +147,14 @@ class Users:
             "can_be_used": can_be_used,
         }
         encoded = jwt.encode(payload, secret, algorithm="HS256")
+
+        with DatabaseOperator(self._db_pool) as dboptr:
+            dboptr[1].execute(
+                "UPDATE `users` SET `last_login` = ? WHERE `user_id` = ?",
+                (now_time, self.user_id),
+            )
+            dboptr[0].commit()
+
         return encoded
 
     def refreshUserToken(self, old_token, secret, vaild_time=3600):
