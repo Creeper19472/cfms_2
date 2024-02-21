@@ -95,7 +95,7 @@ class Users:
             for i in self.groups:
 
                 dboptr[1].execute(
-                    "SELECT `right`, `mode` FROM `group_rights` WHERE `group_id` = ? AND (`expire_time` > ? OR `expire_time` <= 0) AND `groups`.`status` = 0",
+                    "Select `right`, `mode` from group_rights left join `groups` ON (`groups`.`id` = `group_rights`.`id`) AND (`groups`.`g_id` = ?) AND (`expire_time` > ? OR `expire_time` <= 0) AND `groups`.`status` = 0;",
                     (i, time.time()),
                 )
                 _rights = dboptr[1].fetchall()

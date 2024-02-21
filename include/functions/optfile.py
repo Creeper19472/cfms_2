@@ -759,12 +759,14 @@ def handle_createFile(instance, loaded_recv, user: Users):
         today = datetime.date.today()
 
         destination_path = (
-            f"{instance.server.root_abspath}/content/files/{today.year}/{today.month}"
+            f"/content/files/{today.year}/{today.month}"
         )
 
-        os.makedirs(destination_path, exist_ok=True)  # 即使文件夹已存在也加以继续
+        destination_abspath = instance.server.root_abspath + destination_path
 
-        with open(f"{destination_path}/{real_filename}", "w") as new_file:
+        os.makedirs(destination_abspath, exist_ok=True)  # 即使文件夹已存在也加以继续
+
+        with open(f"{destination_abspath}/{real_filename}", "w") as new_file:
             pass
 
         # 注册数据库条目
@@ -786,7 +788,7 @@ def handle_createFile(instance, loaded_recv, user: Users):
         # handle_cursor.execute("BEGIN TRANSACTION;")
 
         dboptr[1].execute(
-            "INSERT INTO document_indexes (`id`, `abspath`) VALUES (?, ?)",
+            "INSERT INTO document_indexes (`id`, `path`) VALUES (?, ?)",
             (index_file_id, destination_path + "/" + real_filename),
         )
 

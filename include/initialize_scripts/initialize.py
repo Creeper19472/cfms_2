@@ -94,7 +94,7 @@ def initDatabaseStructure(db_pool):
             "edit_other_users": 0,
             "set_usergroups": 0,
             "set_userrights": 0,
-            "action_server_destroy": 0
+            "action_server_destroy": 0,
         },
         status=0,
         dboptr=dboptr,
@@ -158,17 +158,22 @@ def initDatabaseStructure(db_pool):
         "__subinherit__": True,  # 是否被下层所继承，如果为 False，则在判断时将返回为真；仅目录有此设置
         "read": [],
         "write": [],
-        "deny": {"read": [], "write": []},
+        "deny": {
+            "read": {
+                "groups": {},
+                "users": {},
+                "rules": [],
+            },
+            "write": {},
+        },
     }
 
-    insert_doc_external_access = (
-        {  # 这里的 access 下记录的是允许的操作而非权限，即：read, write, delete, permanently_delete, rename
-            "groups": {
-                "sysop": {"read": {"expire": 0}, "permanently_delete": {"expire": 0}}
-            },
-            "users": {},
-        }
-    )
+    insert_doc_external_access = {  # 这里的 access 下记录的是允许的操作而非权限，即：read, write, delete, permanently_delete, rename
+        "groups": {
+            "sysop": {"read": {"expire": 0}, "permanently_delete": {"expire": 0}}
+        },
+        "users": {},
+    }
 
     insert_doc_state = {"code": "ok", "expire_time": 0}
 
@@ -230,9 +235,7 @@ def initDatabaseStructure(db_pool):
         "CREATE TABLE `policies`(`id` VARCHAR(255) PRIMARY KEY, `content` TEXT, `access_rules` TEXT, `external_access` TEXT)"
     )
 
-    for dirpath, dirnames, filenames in os.walk(
-        f"./include/initial_policies"
-    ):
+    for dirpath, dirnames, filenames in os.walk(f"./include/initial_policies"):
         for file in filenames:
             if not file.endswith(".json"):
                 continue

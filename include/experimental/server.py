@@ -1,4 +1,3 @@
-
 # from collections.abc import Callable
 
 from functools import wraps
@@ -32,22 +31,35 @@ from include.database.operator import DatabaseOperator
 from include.functions import auth, optfile, optdir, optgroup, optpol
 from include.logtool import getCustomLogger
 
+
 class HandshakeError(Exception):
     pass
+
 
 class ProgrammedSystemExit(Exception):
     """
     用于传递程序性退出的异常。
     """
+
     pass
 
+
 class ThreadedSocketServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-    def __init__(self, server_address, RequestHandlerClass, server_config: dict, db_pool, bind_and_activate: bool = True) -> None:
+    def __init__(
+        self,
+        server_address,
+        RequestHandlerClass,
+        server_config: dict,
+        db_pool,
+        bind_and_activate: bool = True,
+    ) -> None:
         super().__init__(server_address, RequestHandlerClass, bind_and_activate)
 
         self._pool = db_pool
 
-        self.root_abspath = os.path.abspath("") # 获取当前绝对路径。根据该函数实现方法，应当返回工作目录
+        self.root_abspath = os.path.abspath(
+            ""
+        )  # 获取当前绝对路径。根据该函数实现方法，应当返回工作目录
         self.config = server_config
 
         # 同样为 SocketServer 申请 logger
@@ -70,9 +82,7 @@ class ThreadedSocketServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         self.is_requested_shutdown = threading.Event()
 
         # 设置操作锁组
-        self.locks = {
-            "SYS_IOLOCK": threading.RLock()
-        }
+        self.locks = {"SYS_IOLOCK": threading.RLock()}
 
     def handle_request(self) -> None:
         return super().handle_request()
@@ -80,23 +90,25 @@ class ThreadedSocketServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     def shutdown(self) -> None:
         self.is_requested_shutdown.set()
         return super().shutdown()
-    
+
     def handle_error(self, request, client_address) -> None:
-        
+
         exc_type, exc_value, exc_traceback = sys.exc_info()
 
         if exc_type in (ProgrammedSystemExit, HandshakeError):
             return
-        
+
         if exc_type == ConnectionAbortedError:
             self.logger.info(f"{client_address}: Connection aborted")
             return
         elif exc_type == ConnectionResetError:
             self.logger.info(f"{client_address}: Connection reset")
             return
-        
-        self.logger.fatal(f"Exception occurred during processing of request from {client_address}:", exc_info=True)
-    
+
+        self.logger.fatal(
+            f"Exception occurred during processing of request from {client_address}:",
+            exc_info=True,
+        )
 
 
 class SocketHandler(socketserver.BaseRequestHandler):
@@ -124,14 +136,13 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
     RES_DUPLICATE_PACK = {"code": 400, "msg": "invaild nonce: duplicate pack?"}
 
-
     def __init__(self, request, client_address, server: ThreadedSocketServer) -> None:
 
         self.request = request
         self.client_address = client_address
         self.server = server
 
-        self.config = self.server.config # patch
+        self.config = self.server.config  # patch
 
         self._pool = self.server._pool
 
@@ -157,21 +168,22 @@ class SocketHandler(socketserver.BaseRequestHandler):
         )
 
         self.setup()
-        
+
         try:
             self.handle()
         finally:
             self.finish()
-        
+
         # super().__init__(request, client_address, server)
-        
 
     def send(self, msg):  # 不内置 json.dumps(): some objects are not hashable
         self.logger.debug(f"raw message to send: {msg}")
         msg_to_send = msg.encode()
 
         if self.encrypted_connection:
-            encrypted_data = self.aes_encrypt(msg, self.aes_key)  # aes_encrypt() 接受文本
+            encrypted_data = self.aes_encrypt(
+                msg, self.aes_key
+            )  # aes_encrypt() 接受文本
             self.request.sendall(encrypted_data)
         else:
             self.request.sendall(msg_to_send)
@@ -202,7 +214,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
             "code": code,
             "msg": msg,
             "trace_id": self.trace_id,
-            "api_version": "v1"
+            "api_version": "v1",
         }
 
         _response = dict(**_header, **content)
@@ -301,14 +313,15 @@ class SocketHandler(socketserver.BaseRequestHandler):
         except:
             self.logger.info(f"{self.client_address}: Handshake failed.")
             self.logger.info(
-                f"{self.client_address}: Error details for this handshake process:", exc_info=True
+                f"{self.client_address}: Error details for this handshake process:",
+                exc_info=True,
             )
             raise HandshakeError
 
         self.send(json.dumps({"msg": "ok", "code": 0}))  # 发送成功回答
 
         return
-    
+
     def finish(self):
         return super().finish()
 
@@ -337,7 +350,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
         while not self.server.is_requested_shutdown.is_set():
             # self.server.shutdown_request()
 
-            self.trace_id = None # 置空
+            self.trace_id = None  # 置空
 
             """
             X-Ca-Timestamp、X-Ca-Nonce
@@ -361,15 +374,18 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
                 # 判断 API 版本
                 if not client_api_version:
-                    self.send(json.dumps({"code": -1, "msg": "API version is not given"}))
+                    self.send(
+                        json.dumps({"code": -1, "msg": "API version is not given"})
+                    )
                     continue
 
                 if client_api_version == 1:
                     self.handle_v1(loaded_recv)
                 else:  # 目前仅支持 V1
-                    self.send(json.dumps({"code": -1, "msg": "unsupported API version"}))
+                    self.send(
+                        json.dumps({"code": -1, "msg": "unsupported API version"})
+                    )
                     continue
-
 
             except (ConnectionAbortedError, ConnectionResetError):
                 raise
@@ -382,36 +398,53 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
                 exc_log_id = self.trace_id if self.trace_id else secrets.token_hex(8)
 
-                self.logger.error(f"[{exc_log_id}] Error occurred when handling the request of {self.client_address}:", exc_info=True)
+                self.logger.error(
+                    f"[{exc_log_id}] Error occurred when handling the request of {self.client_address}:",
+                    exc_info=True,
+                )
 
                 e_type, e_value, e_traceback = sys.exc_info()
-                self.respond(500, msg="Internal Server Error", exc_info={
-                    "exc_id": exc_log_id, # self.trace_id if exists, else a randomized 8-letter string
-                    "exc_type": str(e_type),
-                    "exc_value": str(e_value) if self.server.config["debug"]["show_exc_details"] else None,
-                    "exc_traceback": traceback.format_exc() if self.server.config["debug"]["show_exc_details"] else None
-                })
+                self.respond(
+                    500,
+                    msg="Internal Server Error",
+                    exc_info={
+                        "exc_id": exc_log_id,  # self.trace_id if exists, else a randomized 8-letter string
+                        "exc_type": str(e_type),
+                        "exc_value": (
+                            str(e_value)
+                            if self.server.config["debug"]["show_exc_details"]
+                            else None
+                        ),
+                        "exc_traceback": (
+                            traceback.format_exc()
+                            if self.server.config["debug"]["show_exc_details"]
+                            else None
+                        ),
+                    },
+                )
 
                 del exc_log_id, e_traceback, e_type, e_value
                 continue
             # print(f"recv: {recv}")
 
         # 当跳出上述循环，即代表处理过程终止
-        
-        self.logger.debug(f"终止信号被激活，正在终止处理连接 {self.client_address} 的操作...")
+
+        self.logger.debug(
+            f"终止信号被激活，正在终止处理连接 {self.client_address} 的操作..."
+        )
 
         return
         # self.logger.debug("正在终止与客户端和数据库的连接...")
-        
+
         # self.db_conn.close()
-    
+
     def filterPathProperties(self, properties: dict):
         result = properties
 
         # TODO #11
 
         return result
-    
+
     def _getNewestRevisionID(self, path_id) -> str | None:
 
         with DatabaseOperator(self._pool) as couple:
@@ -438,7 +471,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
             # 如果已经删除
             for per_revision in sorted_revisions:  # per_revision is a tuple
-                if per_revision[1]["state"]["code"] == "deleted":  # 我们假定用户希望得到最新的版本是未被删除的
+                if (
+                    per_revision[1]["state"]["code"] == "deleted"
+                ):  # 我们假定用户希望得到最新的版本是未被删除的
                     continue
                 # 指定 newest
                 newest_revision = per_revision
@@ -447,9 +482,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
             return newest_revision[0] if newest_revision else None  # 指定
 
     def _hasFileRecord(self, file_id):  # path_structures
-        
+
         with DatabaseOperator(self._pool) as couple:
-        
+
             couple[1].execute(
                 "SELECT name FROM path_structures WHERE id = ?", (file_id,)
             )
@@ -463,7 +498,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
                 return False
             else:
                 raise RuntimeError("Wrong result length")
-    
+
     def getFileSize(self, path_id, rev_id=None):
 
         with DatabaseOperator(self._pool) as couple:
@@ -471,7 +506,8 @@ class SocketHandler(socketserver.BaseRequestHandler):
             # g_cur = self.db_cursor
 
             couple[1].execute(
-                "SELECT `type`, `revisions` FROM path_structures WHERE `id` = ?", (path_id,)
+                "SELECT `type`, `revisions` FROM path_structures WHERE `id` = ?",
+                (path_id,),
             )
 
             query_result = couple[1].fetchall()
@@ -479,7 +515,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
             if len(query_result) == 0:
                 raise FileNotFoundError
             elif len(query_result) > 1:
-                raise RuntimeError("在执行 getFileSize 操作时发现数据库出现相同ID的多条记录")
+                raise RuntimeError(
+                    "在执行 getFileSize 操作时发现数据库出现相同ID的多条记录"
+                )
 
             this_file_result = query_result[0]
 
@@ -488,7 +526,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
             if not rev_id:
                 rev_id = self._getNewestRevisionID(path_id)
-                if not rev_id:  # 如果自动获取了ID却仍然为空（代表没有满足条件的结果），则不计算大小
+                if (
+                    not rev_id
+                ):  # 如果自动获取了ID却仍然为空（代表没有满足条件的结果），则不计算大小
                     return -1
 
             # index_file_id = this_file_result[1]
@@ -505,7 +545,8 @@ class SocketHandler(socketserver.BaseRequestHandler):
             del this_file_result, query_result  # 清除
 
             couple[1].execute(
-                "SELECT `abspath` FROM document_indexes WHERE `id` = ?", (this_rev_file_id,)
+                "SELECT `path` FROM document_indexes WHERE `id` = ?",
+                (this_rev_file_id,),
             )
 
             query_result = couple[1].fetchall()
@@ -513,7 +554,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
             if len(query_result) == 0:
                 raise FileNotFoundError("在 document_indexes 表中未发现对应的数据")
             elif len(query_result) > 1:
-                raise RuntimeError("在执行 getFileSize 操作时发现数据库出现相同ID的多条记录")
+                raise RuntimeError(
+                    "在执行 getFileSize 操作时发现数据库出现相同ID的多条记录"
+                )
 
             this_real_file_result = query_result[0]
 
@@ -521,7 +564,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
             # g_cur.close()
 
             if self.server.locks["SYS_IOLOCK"].acquire(timeout=0.75):
-                filesize = os.path.getsize(this_real_file_result[0])
+                filesize = os.path.getsize(
+                    self.server.root_abspath + this_real_file_result[0]
+                )
                 self.server.locks["SYS_IOLOCK"].release()
                 return filesize
             else:  # 如果超时
@@ -537,7 +582,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
     ):
         if not access_rules:  # fix #7
             return True  # fallback
-        
+
         # print(access_rules)
 
         if "super_access" in user.rights:
@@ -597,7 +642,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
                     if i in user.groups:  # 如果用户存在于此用户组
                         return True
 
-            if user.username in external_access["users"].keys():  # 如果用户在字典中有记录
+            if (
+                user.username in external_access["users"].keys()
+            ):  # 如果用户在字典中有记录
                 if (
                     action
                     in (
@@ -613,8 +660,15 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
         return False
 
-    def verifyUserAccess(self, id, action, user: Users, checkdeny=True, _subcall=False, \
-                         dboptr: DatabaseOperator = None):
+    def verifyUserAccess(
+        self,
+        id,
+        action,
+        user: Users,
+        checkdeny=True,
+        _subcall=False,
+        dboptr: DatabaseOperator = None,
+    ):
         """
         用户鉴权函数。
         用于逐级检查用户是否拥有 **文件或文件夹的** 访问权限，若发生任意不满足条件的情况即返回 False
@@ -672,7 +726,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
             if result[0][3] != "dir":
                 raise TypeError("Not a directory: does not support _subcall")
 
-            if not access_rules.get("__subinherit__", True):  # 如果设置为下层不继承（对于文件应该无此设置）
+            if not access_rules.get(
+                "__subinherit__", True
+            ):  # 如果设置为下层不继承（对于文件应该无此设置）
                 self.logger.debug("本层设置为下层不继承，返回为真")
                 return True
 
@@ -702,13 +758,17 @@ class SocketHandler(socketserver.BaseRequestHandler):
                 self.logger.debug("完毕，无事发生。")
 
             elif por_policy["inherit_by_subdirectory"]:  # 如果没有父级（是根目录）
-                if not self.verifyUserAccess("", action, user, parent_checkdeny, True, dboptr):
+                if not self.verifyUserAccess(
+                    "", action, user, parent_checkdeny, True, dboptr
+                ):
                     return False
 
         else:
             self.logger.debug("请求操作在该路径上被设置为不继承上层设置，跳过")
 
-        self.logger.debug(f"所有访问规则和附加权限记录：{access_rules}, {external_access}")
+        self.logger.debug(
+            f"所有访问规则和附加权限记录：{access_rules}, {external_access}"
+        )
 
         if self._verifyAccess(
             user, action, access_rules, external_access, check_deny=checkdeny
@@ -724,7 +784,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
     def handle_v1(self, loaded_recv):
         """
         实际处理符合 API v1 规范的入口函数。
-        
+
         该函数通过调用拆分至各个模块的以实例自身为第一参数的分函数进行请求的处理。
         """
 
@@ -733,23 +793,25 @@ class SocketHandler(socketserver.BaseRequestHandler):
         self.logger.debug("handle_v1() 函数被调用")
 
         if "trace_id" in loaded_recv:
-            self.trace_id = loaded_recv["trace_id"] # 准备合并
+            self.trace_id = loaded_recv["trace_id"]  # 准备合并
 
         # Replay attack fix
         if not self.trace_id:
             self.respond(**self.RES_BAD_REQUEST)
             return
-        
+
         try:
             request_timestamp: float = loaded_recv["X-Ca-Timestamp"]
         except KeyError:
             self.respond(400, msg="X-Ca-Timestamp is not provided")
             return
 
-        if (time.time() - 300 > request_timestamp) or (time.time() + 300 < request_timestamp): # +-300 秒误差范围
+        if (time.time() - 300 > request_timestamp) or (
+            time.time() + 300 < request_timestamp
+        ):  # +-300 秒误差范围
             self.respond(400, msg="X-Ca-Timestamp out of allowed range")
             return
-        
+
         # if request_nonce in used_nonces:
         #     pass
 
@@ -761,14 +823,13 @@ class SocketHandler(socketserver.BaseRequestHandler):
                     raise ValueError
             except KeyError:
                 self.logger.debug("提交的请求没有提供 data 键值")
-                self.respond(-1, msg ="invaild arguments")
+                self.respond(-1, msg="invaild arguments")
                 return
             except ValueError:
-                self.logger.debug("提交的请求没有提供用户名或密码（可能 data 下对应键值为空）")
-                self.respond(
-                    -2,
-                    msg="no username or password provided"
+                self.logger.debug(
+                    "提交的请求没有提供用户名或密码（可能 data 下对应键值为空）"
                 )
+                self.respond(-2, msg="no username or password provided")
                 return
 
             self.logger.debug(
@@ -818,7 +879,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
             "operateUser": auth.handle_operateUser,
             "getRootDir": optdir.handle_getRootDir,
             "getPolicy": optpol.handle_getPolicy,
-            "getAvatar": auth.handle_getAvatar, 
+            "getAvatar": auth.handle_getAvatar,
             "createFile": optfile.handle_createFile,
             "createUser": auth.handle_createUser,
             "createDir": optdir.handle_createDir,
@@ -834,11 +895,11 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
         # 定义了需要传入 Users 对象的函数列表。用于判断使用。
         # External User Objects
-        outfile_requests = ( 
-            "operateFile", 
-            "operateDir", 
-            "getRootDir", 
-            "operateUser", 
+        outfile_requests = (
+            "operateFile",
+            "operateDir",
+            "getRootDir",
+            "operateUser",
             "getPolicy",
             "getAvatar",
             "createFile",
@@ -847,8 +908,8 @@ class SocketHandler(socketserver.BaseRequestHandler):
             "createGroup",
             "getUserProperties",
             "getFileRevisions",
-            )
-        
+        )
+
         excluded_requests = ("refreshToken",)
 
         given_request = loaded_recv["request"]
@@ -859,13 +920,13 @@ class SocketHandler(socketserver.BaseRequestHandler):
                 user = self.all_users[self.this_time_username]
 
                 # 读取 token_secret
-                with open(f"{self.server.root_abspath}/content/auth/token_secret", "r") as ts_file:
+                with open(
+                    f"{self.server.root_abspath}/content/auth/token_secret", "r"
+                ) as ts_file:
                     token_secret = ts_file.read()
 
                 if not user.isVaildToken(self.this_time_token, token_secret):
-                    self.respond(
-                        **{"code": -1, "msg": "invaild token or username"}
-                    )
+                    self.respond(**{"code": -1, "msg": "invaild token or username"})
                     return
 
                 available_requests[given_request](self, loaded_recv, user=user)
@@ -906,10 +967,8 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
                     self.respond(
                         0,
-                            token = user.generateUserToken(
-                                ("all"), 3600, token_secret
-                            ),
-                            ftp_port = self.server.config["connect"]["ftp_port"],                    
+                        token=user.generateUserToken(("all"), 3600, token_secret),
+                        ftp_port=self.server.config["connect"]["ftp_port"],
                     )
 
                 else:
@@ -927,7 +986,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
                     else:
                         fail_msg = "username or password incorrect"
 
-                    self.respond(401, msg = fail_msg)
+                    self.respond(401, msg=fail_msg)
             else:
                 if self.server.config["security"]["show_login_fail_details"]:
                     fail_msg = "user does not exist"
@@ -941,8 +1000,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
                     self.logger.debug(f"正根据登录策略睡眠 {sleep_for_fail} 秒")
                     time.sleep(sleep_for_fail)
 
-                self.respond(401, msg = fail_msg)
-
+                self.respond(401, msg=fail_msg)
 
     # @staticmethod
     def userOperationAuthWrapper(func):
@@ -955,13 +1013,13 @@ class SocketHandler(socketserver.BaseRequestHandler):
             user = self.all_users[self.this_time_username]
 
             # 读取 token_secret
-            with open(f"{self.server.root_abspath}/content/auth/token_secret", "r") as ts_file:
+            with open(
+                f"{self.server.root_abspath}/content/auth/token_secret", "r"
+            ) as ts_file:
                 token_secret = ts_file.read()
 
             if not user.isVaildToken(self.this_time_token, token_secret):
-                self.respond(
-                    **{"code": -1, "msg": "invaild token or username"}
-                )
+                self.respond(**{"code": -1, "msg": "invaild token or username"})
                 return
 
             ### 结束
@@ -969,7 +1027,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
             func(self, *args, **kwargs, user=user)  # 仅当上述操作成功该函数才会被执行
 
         return _wrapper
-    
+
     @userOperationAuthWrapper
     def handle_shutdown(self, loaded_recv, user: Users):
         if not "shutdown" in user.rights:
@@ -982,6 +1040,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
         return
 
+
 if __name__ == "__main__":
 
     HOST, PORT = "localhost", 9999
@@ -990,7 +1049,9 @@ if __name__ == "__main__":
         config = tomllib.load(f)
 
     # Create the server, binding to localhost on port 9999
-    with ThreadedSocketServer((HOST, PORT), SocketHandler, server_config=config) as server:
+    with ThreadedSocketServer(
+        (HOST, PORT), SocketHandler, server_config=config
+    ) as server:
         # Activate the server; this will keep running until you
         # interrupt the program with Ctrl-C
         server.serve_forever()
