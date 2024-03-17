@@ -286,6 +286,18 @@ def initDatabaseStructure(db_pool):
     with open("content/auth/pri.pem", "wb") as pri_fp:
         pri_fp.write(pri_key)
 
+    # 生成X25519私钥
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    private_key = X25519PrivateKey.generate()
+    with open("content/auth/x25519_pri", "wb") as x_pri_f:
+        x_pri_f.write(private_key.private_bytes_raw())
+
+    x25519_public_key = private_key.public_key()
+
+    with open("content/auth/x25519_pub", "wb") as x_pub_f:
+        x_pub_f.write(x25519_public_key.public_bytes_raw())
+
     ### 新建文件传输临时列表数据库
 
     with open("content/fqueue.db", "a") as fqueue_file:

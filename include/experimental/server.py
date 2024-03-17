@@ -9,6 +9,7 @@ import json
 from socketserver import BaseRequestHandler, BaseServer
 
 import os
+import sqlite3
 import sys
 import threading
 import time
@@ -257,27 +258,107 @@ class SocketHandler(socketserver.BaseRequestHandler):
             self.send("Unknown request")
             raise ProgrammedSystemExit
 
-        self.send(
-            json.dumps(
-                {
-                    "msg": "enableEncryption",
-                    "public_key": self.public_key.export_key("PEM").decode(),
-                    "code": 0,
-                }
-            )
-        )
+        available_key_exchange_methods = ["rsa", "x25519"] # 预先定义可用的方法
 
-        receive_encrypted = self.request.recv(
-            self.server.BUFFER_SIZE
-        )  # 这里还不能用 self.recv() 方法：是加密的, 无法decode()
+        """
+        from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+# Generate a private key for use in the exchange.
+private_key = X25519PrivateKey.generate()
+# In a real handshake the peer_public_key will be received from the
+# other party. For this example we'll generate another private key and
+# get a public key from that. Note that in a DH handshake both peers
+# must agree on a common set of parameters.
+peer_public_key = X25519PrivateKey.generate().public_key()
+shared_key = private_key.exchange(peer_public_key)
+# Perform key derivation.
+derived_key = HKDF(
+    algorithm=hashes.SHA256(),
+    length=32,
+    salt=None,
+    info=b'handshake data',
+).derive(shared_key)
+# For the next handshake we MUST generate another private key.
+private_key_2 = X25519PrivateKey.generate()
+peer_public_key_2 = X25519PrivateKey.generate().public_key()
+shared_key_2 = private_key_2.exchange(peer_public_key_2)
+derived_key_2 = HKDF(
+    algorithm=hashes.SHA256(),
+    length=32,
+    salt=None,
+    info=b'handshake data',
+).derive(shared_key_2)"""
 
-        decrypted_data = self.pri_cipher.decrypt(receive_encrypted)  # 得到AES密钥
+        if (ukem:=config["security"]["use_key_exchange_method"]) in available_key_exchange_methods:
+            if ukem == "rsa":
+                self.send(
+                    json.dumps(
+                        {
+                            "msg": "enableEncryption",
+                            "method": "rsa",
+                            "public_key": self.public_key.export_key("PEM").decode(),
+                            "code": 0,
+                        }
+                    )
+                )
 
-        self.logger.debug(f"AES Key: {decrypted_data}")
+                receive_encrypted = self.request.recv(
+                    self.server.BUFFER_SIZE
+                )  # 这里还不能用 self.recv() 方法：是加密的, 无法decode()
 
-        self.aes_key = decrypted_data
+                decrypted_data = self.pri_cipher.decrypt(receive_encrypted)  # 得到AES密钥
 
-        self.encrypted_connection = True
+                # self.logger.debug(f"AES Key: {decrypted_data}")
+
+                self.aes_key = decrypted_data
+                self.encrypted_connection = True
+                
+            elif ukem == "x25519":
+                from cryptography.hazmat.primitives import hashes
+                from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+                from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+                
+                with open(f"{self.server.root_abspath}/content/auth/x25519_pri", "rb") as x_pri_file:
+                    x_pri_bytes = x_pri_file.read()
+
+                x_private_key = X25519PrivateKey.from_private_bytes(x_pri_bytes)
+                x_public_key = x_private_key.public_key()
+                x_pub_raw = x_public_key.public_bytes_raw()
+
+                self.send(
+                    json.dumps(
+                        {
+                            "msg": "enableEncryption",
+                            "method": "x25519",
+                            "public_key": x_pub_raw,
+                            "code": 0,
+                        }
+                    )
+                )
+
+                receive_encrypted = self.request.recv(
+                    self.server.BUFFER_SIZE
+                )  
+
+                decrypted_data = self.pri_cipher.decrypt(receive_encrypted)  # 得到 private_key
+
+                peer_public_key = X25519PublicKey.from_public_bytes(decrypted_data)
+
+                shared_key: bytes = x_private_key.exchange(peer_public_key)
+
+                # TODO: 实现对多种对称加密模式的支持
+                
+                self.aes_key = shared_key
+                self.encrypted_connection = True
+
+                # # self.x25519_shared_
+                # derived_key = HKDF(
+                #     algorithm=hashes.SHA256(),
+                #     length=32,
+                #     salt=None,
+                #     info=b'handshake data',
+                # ).derive(shared_key)
 
         return
 
@@ -811,6 +892,10 @@ class SocketHandler(socketserver.BaseRequestHandler):
         ):  # +-300 秒误差范围
             self.respond(400, msg="X-Ca-Timestamp out of allowed range")
             return
+
+        if config["database"]["use_cache_engine"] == "sqlite3":
+            s_db = sqlite3.connect(self.server.root_abspath + "/security.db")
+            
 
         # if request_nonce in used_nonces:
         #     pass
