@@ -867,6 +867,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
         except KeyError:
             self.respond(400, msg="X-Ca-Timestamp is not provided")
             return
+        
+        ### 这里写在临时数据库中增加条目的语句
+        # TODO
 
         if (time.time() - 300 > request_timestamp) or (
             time.time() + 300 < request_timestamp

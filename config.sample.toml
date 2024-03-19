@@ -36,6 +36,13 @@ hide_when_no_access = true
 # 是否为各类型的登录失败返回详细的错误信息？
 show_login_fail_details = false
 
+# 加密连接密钥交换方法
+# options: x25519, rsa
+# recommended: x25519
+# default: x25519
+use_key_exchange_method = "x25519"
+
+
 [database]
 
 # 使用的数据库类型，目前支持 sqlite3 与 mysql

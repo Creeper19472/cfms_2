@@ -13,3 +13,5 @@ Future Releases
 8. [ ] 增加二步验证：TOTP模式
 9. [ ] 增加 x25519 密钥交换模式 - high priority
 10. [ ] 修正重放攻击
+
+11. [ ] 考虑增加 ssl 数据库相关

@@ -27,7 +27,8 @@ def getDBPool(config: dict):
             passwd=mysql_password,        # 数据库密码
             port=mysql_port,
             database=mysql_db_name,
-            pool_size = config_pmc
+            pool_size = config_pmc,
+            
         )
 
         return mysql_pool
