@@ -177,9 +177,10 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
         # super().__init__(request, client_address, server)
 
-    def send(self, msg):  # 不内置 json.dumps(): some objects are not hashable
+    def send(self, msg: str|bytes):  # 不内置 json.dumps(): some objects are not hashable
         self.logger.debug(f"raw message to send: {msg}")
-        msg_to_send = msg.encode()
+
+        msg_to_send = msg.encode() if type(msg) == str else msg
 
         if self.encrypted_connection:
             encrypted_data = self.aes_encrypt(
@@ -260,7 +261,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
         available_key_exchange_methods = ["rsa", "x25519"] # 预先定义可用的方法
 
-        if (ukem:=config["security"]["use_key_exchange_method"]) in available_key_exchange_methods:
+        if (ukem:=self.config["security"]["use_key_exchange_method"]) in available_key_exchange_methods:
             if ukem == "rsa":
                 self.send(
                     json.dumps(
@@ -301,7 +302,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
                         {
                             "msg": "enableEncryption",
                             "method": "x25519",
-                            "public_key": x_pub_raw,
+                            "public_key": x_pub_raw.hex(), # json 格式只能使用 str 模式发送
                             "code": 0,
                         }
                     )
@@ -311,9 +312,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
                     self.server.BUFFER_SIZE
                 )  
 
-                decrypted_data = self.pri_cipher.decrypt(receive_encrypted)  # 得到 private_key
+                
 
-                peer_public_key = X25519PublicKey.from_public_bytes(decrypted_data)
+                peer_public_key = X25519PublicKey.from_public_bytes(receive_encrypted)
 
                 shared_key: bytes = x_private_key.exchange(peer_public_key)
 
@@ -332,7 +333,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
                     info=b'handshake data',
                 ).derive(shared_key)
 
-                self.send(derived_key) # 发送导出密钥
+                self.send(derived_key.hex()) # 发送导出密钥
                 self.aes_key = derived_key
 
                 try: self.recv() # 要求客户端发送有效回执
@@ -387,10 +388,10 @@ class SocketHandler(socketserver.BaseRequestHandler):
     def finish(self):
         return super().finish()
 
-    def aes_encrypt(self, plain_text, key):
+    def aes_encrypt(self, plain_text: str|bytes, key):
         cipher = AES.new(key, AES.MODE_CBC)  # 使用CBC模式
 
-        encrypted_text = cipher.encrypt(pad(plain_text.encode(), AES.block_size))
+        encrypted_text = cipher.encrypt(pad(plain_text.encode() if type(plain_text)==str else plain_text, AES.block_size))
 
         iv = cipher.iv
 
@@ -877,8 +878,11 @@ class SocketHandler(socketserver.BaseRequestHandler):
             self.respond(400, msg="X-Ca-Timestamp out of allowed range")
             return
 
-        if config["database"]["use_cache_engine"] == "sqlite3":
-            s_db = sqlite3.connect(self.server.root_abspath + "/security.db")
+        # if self.config["database"]["use_cache_engine"] == "sqlite3":
+        #     s_db = sqlite3.connect(self.server.root_abspath + "/security.db")
+        #     s_cur = s_db.cursor()
+
+
             
 
         # if request_nonce in used_nonces:
@@ -1111,6 +1115,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
 
 if __name__ == "__main__":
+
 
     HOST, PORT = "localhost", 9999
 
