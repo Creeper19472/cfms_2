@@ -144,9 +144,7 @@ def handle_operateFile(instance, loaded_recv, user: Users):
 
     del dboptr # 避免识别上误以为已经定义
 
-    if len(result) > 1:
-        raise ValueError("Invaild query result length")
-    elif len(result) < 1:
+    if not len(result):
         instance.respond(**{"code": -1, "msg": "no such file"})
         return
 
@@ -697,11 +695,11 @@ def handle_createFile(instance, loaded_recv, user: Users):
         if query_result:
             instance.respond(
                 
-                    **{
-                        "code": -1,
-                        "msg": "file or directory exists.",
-                        "__hint__": "if you want to override a file, use 'operateFile' instead.",
-                    }
+                **{
+                    "code": -1,
+                    "msg": "file or directory exists.",
+                    "__hint__": "if you want to override a file, use 'operateFile' instead.",
+                }
                 
             )
             return
@@ -767,7 +765,7 @@ def handle_createFile(instance, loaded_recv, user: Users):
         os.makedirs(destination_abspath, exist_ok=True)  # 即使文件夹已存在也加以继续
 
         with open(f"{destination_abspath}/{real_filename}", "w") as new_file:
-            pass
+            pass # 创建一个空白文件，以防仅创建不上传
 
         # 注册数据库条目
 
@@ -788,8 +786,9 @@ def handle_createFile(instance, loaded_recv, user: Users):
         # handle_cursor.execute("BEGIN TRANSACTION;")
 
         dboptr[1].execute(
-            "INSERT INTO document_indexes (`id`, `path`) VALUES (?, ?)",
-            (index_file_id, destination_path + "/" + real_filename),
+            "INSERT INTO document_indexes (`id`, `path`, `sha256`, `size`) VALUES (?, ?, ?, ?)",
+            (index_file_id, destination_path + "/" + real_filename, None, 0),
+            # 这里 size=0 的原因是因为此时可以认为新文件大小为零
         )
 
         dboptr[1].execute(

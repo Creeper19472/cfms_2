@@ -20,7 +20,7 @@ APScheduler
 mysql-connector-python # 8.0 support
 
 pluggy
-
 dbutils
-
 pyotp
+
+sqlalchemy

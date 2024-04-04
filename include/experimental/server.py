@@ -29,7 +29,7 @@ from include.bulitin_class.users import AllUsers, Users
 
 from include.database.operator import DatabaseOperator
 
-from include.functions import auth, optfile, optdir, optgroup, optpol
+from include.functions import auth, optfile, optdir, optgroup, optpol, optshort
 from include.logtool import getCustomLogger
 
 
@@ -286,6 +286,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
                 self.encrypted_connection = True
                 
             elif ukem == "x25519":
+                # It is recommended that a client generates a randomized private key when connecting
+                # to the server in order to ensure safety. 
+
                 from cryptography.hazmat.primitives import hashes
                 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
                 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -312,8 +315,6 @@ class SocketHandler(socketserver.BaseRequestHandler):
                     self.server.BUFFER_SIZE
                 )  
 
-                
-
                 peer_public_key = X25519PublicKey.from_public_bytes(receive_encrypted)
 
                 shared_key: bytes = x_private_key.exchange(peer_public_key)
@@ -321,15 +322,13 @@ class SocketHandler(socketserver.BaseRequestHandler):
                 # TODO: 实现对多种对称加密模式的支持
                 
                 self.aes_key = shared_key # 先用协商密钥为双向加密密钥发送新密钥
-                
-
                 self.encrypted_connection = True
 
                 # # self.x25519_shared_
                 derived_key = HKDF(
                     algorithm=hashes.SHA256(),
                     length=32,
-                    salt=None,
+                    salt=secrets.token_bytes(16),
                     info=b'handshake data',
                 ).derive(shared_key)
 
@@ -508,7 +507,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
         return result
 
-    def _getNewestRevisionID(self, path_id) -> str | None:
+    def _getNewestFileRevisionID(self, path_id) -> str | None:
 
         with DatabaseOperator(self._pool) as couple:
             handle_cursor = couple[1]
@@ -577,10 +576,6 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
             if len(query_result) == 0:
                 raise FileNotFoundError
-            elif len(query_result) > 1:
-                raise RuntimeError(
-                    "在执行 getFileSize 操作时发现数据库出现相同ID的多条记录"
-                )
 
             this_file_result = query_result[0]
 
@@ -588,7 +583,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
                 raise TypeError
 
             if not rev_id:
-                rev_id = self._getNewestRevisionID(path_id)
+                rev_id = self._getNewestFileRevisionID(path_id)
                 if (
                     not rev_id
                 ):  # 如果自动获取了ID却仍然为空（代表没有满足条件的结果），则不计算大小
@@ -608,7 +603,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
             del this_file_result, query_result  # 清除
 
             couple[1].execute(
-                "SELECT `path` FROM document_indexes WHERE `id` = ?",
+                "SELECT `path`, `sha256`, `size` FROM document_indexes WHERE `id` = ?",
                 (this_rev_file_id,),
             )
 
@@ -621,19 +616,18 @@ class SocketHandler(socketserver.BaseRequestHandler):
                     "在执行 getFileSize 操作时发现数据库出现相同ID的多条记录"
                 )
 
-            this_real_file_result = query_result[0]
+            real_file_path, real_file_sha256, real_file_size = query_result[0]
 
-            # cleanup
-            # g_cur.close()
+            return real_file_size
 
-            if self.server.locks["SYS_IOLOCK"].acquire(timeout=0.75):
-                filesize = os.path.getsize(
-                    self.server.root_abspath + this_real_file_result[0]
-                )
-                self.server.locks["SYS_IOLOCK"].release()
-                return filesize
-            else:  # 如果超时
-                return -1
+            # if self.server.locks["SYS_IOLOCK"].acquire(timeout=0.75):
+            #     filesize = os.path.getsize(
+            #         self.server.root_abspath + real_file_path
+            #     )
+            #     self.server.locks["SYS_IOLOCK"].release()
+            #     return filesize
+            # else:  # 如果超时
+            #     return -1
 
     def _verifyAccess(
         self,
@@ -950,6 +944,8 @@ class SocketHandler(socketserver.BaseRequestHandler):
             "operateFile": optfile.handle_operateFile,
             "operateDir": optdir.handle_operateDir,
             "operateUser": auth.handle_operateUser,
+            "getShortcut": optshort.handle_getShortcut,
+            "operateShortcut": optshort.handle_operateShortcuts,
             "getRootDir": optdir.handle_getRootDir,
             "getPolicy": optpol.handle_getPolicy,
             "getAvatar": auth.handle_getAvatar,

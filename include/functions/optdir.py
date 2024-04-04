@@ -66,6 +66,7 @@ def handle_getRootDir(instance, loaded_recv, user: Users):
 
             if i[2] == "file":
                 filtered_properties["size"] = instance.getFileSize(i[0])
+                # filtered_properties["sha256"] = instance.getFileHash()
 
             # print(i)
             dir_result[i[0]] = {
@@ -115,9 +116,7 @@ def handle_operateDir(instance, loaded_recv, user: Users):
 
     # print(result)
 
-    if len(result) > 1:
-        raise ValueError("Invaild query result length")
-    elif len(result) < 1:
+    if len(result) < 1:
         instance.respond(**{"code": -1, "msg": "no such dir"})
         return
     else:

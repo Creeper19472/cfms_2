@@ -4,6 +4,7 @@ import threading
 import time
 
 import sys
+from include.database.operator import DatabaseOperator
 from include.database.pool import getDBPool
 from include.logtool import getCustomLogger
 sys.path.append("./include/") # relative hack
@@ -113,6 +114,14 @@ class FTPCustomizedHandler(TLS_FTPHandler):
             # print("executing")
             fq_cursor.execute("UPDATE ft_queue SET done = ? WHERE task_id = ? AND fake_id = ?;" , (done, self.username, fake_filename))
 
+            with DatabaseOperator(DB_POOL) as dboptr:
+                filesize = os.path.getsize(file)
+                with open(file, "rb") as uploaded_file:
+                    file_digest = hashlib.file_digest(uploaded_file, "sha256")
+                    file_sha256 = file_digest.hexdigest()
+                dboptr[1].execute("UPDATE `document_indexes` SET `size` = ?, `sha256` = ? WHERE `document_indexes`.`id` = ?;", (filesize, file_sha256, self.authorizer.user_table[self.username]['files_mapping'][fake_filename]))
+                dboptr[0].commit()
+                
         fq_db.commit()
         fq_db.close()
 
@@ -218,6 +227,7 @@ class DummyMD5Authorizer(DummyAuthorizer):
             os.makedirs(fake_abspath)
 
         files_dict = {}
+        files_mapping_dict = {}
 
         # 遍历文件列表，执行复制（链接）操作
         for i in query_results:
@@ -231,6 +241,8 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
                 # 存储 fake ID 与路径的对应关系
                 files_dict[fake_id] = real_file_path
+                # fake_id 2 file_id
+                files_mapping_dict[fake_id] = file_id
 
                 if operation == "read":
                     # print("read mode detected")
@@ -264,7 +276,8 @@ class DummyMD5Authorizer(DummyAuthorizer):
             'msg_quit': str(msg_quit),
             'home': fake_abspath,
             'operation': operation,
-            'files': files_dict
+            'files': files_dict,
+            'files_mapping': files_mapping_dict
             }
         self.user_table[username] = dic
 

@@ -95,6 +95,9 @@ def initDatabaseStructure(db_pool):
             "set_usergroups": 0,
             "set_userrights": 0,
             "action_server_destroy": 0,
+            "add_shortcuts": 0,
+            "remove_shortcuts": 0,
+            # "view_all_shortcuts": 0
         },
         status=0,
         dboptr=dboptr,
@@ -112,7 +115,7 @@ def initDatabaseStructure(db_pool):
     ### document_indexes
 
     dboptr[1].execute(
-        "CREATE TABLE document_indexes(`id` VARCHAR(255) PRIMARY KEY, `path` TEXT)"
+        "CREATE TABLE document_indexes(`id` VARCHAR(255) PRIMARY KEY, `path` TEXT, `sha256` VARCHAR(64), `size` INTEGER)"
     )
 
     ### path 存储一个相对于运行根目录的路径，将在调用时自动拼接根目录绝对路径处理
@@ -122,7 +125,8 @@ def initDatabaseStructure(db_pool):
         ("DEFAULT_USER_AVATAR", "/content/files/user.png"),
     )
 
-    dboptr[1].executemany("INSERT INTO document_indexes VALUES(?, ?)", insert_doc)
+    # 插入初始数据，这里就懒得计算哈希值了
+    dboptr[1].executemany("INSERT INTO document_indexes(`id`, `path`) VALUES(?, ?)", insert_doc)
     dboptr[0].commit()
 
     #######################
@@ -130,8 +134,8 @@ def initDatabaseStructure(db_pool):
     # 新建伪路径索引定义表
     dboptr[1].execute(
         "CREATE TABLE path_structures\
-                (`id` VARCHAR(255) PRIMARY KEY, `name` TEXT, `owner` TEXT, `parent_id` TEXT, `type` TEXT, \
-                `revisions` TEXT, `access_rules` BLOB, `external_access` BLOB, `properties` BLOB, `state` TEXT)"
+                (`id` VARCHAR(255) PRIMARY KEY, `name` TEXT, `owner` TEXT, `parent_id` VARCHAR(255), `type` TEXT, \
+                `revisions` TEXT, `access_rules` TEXT, `external_access` TEXT, `properties` TEXT, `state` TEXT)"
     )
     # file_id: 如果是文件就必须有；文件夹应该没有
 
@@ -217,6 +221,13 @@ def initDatabaseStructure(db_pool):
     )
     dboptr[1].executemany(
         "INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", insert_paths
+    )
+
+
+    # create shortcut table
+    dboptr[1].execute(
+        "CREATE TABLE `shortcuts`\
+                (`short_id` VARCHAR(255) PRIMARY KEY, `short_value` VARCHAR(255), `owner` TEXT)"
     )
 
     # create config table(internal)

@@ -12,3 +12,6 @@ Future Releases
 9. [x] 增加 x25519 密钥交换模式 - high priority
 10. [ ] 修正重放攻击
 11. [ ] 考虑增加 ssl 数据库相关
+12. [ ] 在 getDir 等请求的返回消息中增加文件哈希信息
+13. [ ] 增加数据库ORM -> sqlalchemy
+14. [ ] 禁止同目录下同文件名文件的存在

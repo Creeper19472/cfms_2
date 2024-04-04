@@ -87,12 +87,15 @@ class Users:
                 else:
                     raise RuntimeError(f"Invaild permission type: {each_perm[1]}")
                 
+                
             # 默认包含 user 组
             self.groups.add("user")
 
             # 载入用户组所包含的权限
                 
             for i in self.groups:
+
+                # print(98, f"group {i}")
 
                 dboptr[1].execute(
                     "Select `right`, `mode` from group_rights left join `groups` ON (`groups`.`id` = `group_rights`.`id`) AND (`groups`.`g_id` = ?) AND (`expire_time` > ? OR `expire_time` <= 0) AND `groups`.`status` = 0;",
@@ -104,12 +107,12 @@ class Users:
 
                 for each_right in _rights:
                     if each_right[1] == "granted":
-                        self.rights.add(each_perm[0])
+                        self.rights.add(each_right[0])
                     elif each_right[1] == "revoked":
-                        _group_revoked_rights.add(each_perm[0])
+                        _group_revoked_rights.add(each_right[0])
                     else:
                         raise RuntimeError(
-                            f"Invaild mode for right {each_perm[0]} of group {i}: {each_perm[1]}"
+                            f"Invaild mode for right {each_right[0]} of group {i}: {each_right[1]}"
                         )
 
             self.rights -= _revoked_rights
