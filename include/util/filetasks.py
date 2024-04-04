@@ -24,7 +24,7 @@ def createFileIndex(instance, new_index_id: str | None = None):
         today = datetime.date.today()
 
         destination_path = (
-            f"{instance.server.root_abspath}/content/files/{today.year}/{today.month}"
+            f"/content/files/{today.year}/{today.month}"
         )
 
         os.makedirs(destination_path, exist_ok=True)  # 即使文件夹已存在也加以继续
@@ -37,7 +37,7 @@ def createFileIndex(instance, new_index_id: str | None = None):
         # handle_cursor.execute("BEGIN TRANSACTION;")
 
         dboptr[1].execute(
-            "INSERT INTO document_indexes (`id`, `abspath`) VALUES (?, ?)",
+            "INSERT INTO document_indexes (`id`, `path`) VALUES (?, ?)",
             (index_file_id, destination_path + "/" + real_filename),
         )
 

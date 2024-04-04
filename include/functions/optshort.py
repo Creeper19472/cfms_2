@@ -1,9 +1,10 @@
+# coding=utf-8
+from __future__ import unicode_literals, absolute_import
+
 import json
 from include.bulitin_class.users import Users
 from include.database.operator import DatabaseOperator
 
-# coding=utf-8
-from __future__ import unicode_literals, absolute_import
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, String, VARCHAR, Text
 
@@ -16,8 +17,8 @@ ModelBase = declarative_base()  # <-元类
 class Shortcuts(ModelBase):
     __tablename__ = "shortcuts"
 
-    shortcut_id = Column(VARCHAR(255), primary_key=True)
-    shortcut_valve = Column(VARCHAR(255))
+    short_id = Column(VARCHAR(255), primary_key=True)
+    short_value = Column(VARCHAR(255))
     owner = Column(Text())
 
 
@@ -32,7 +33,11 @@ def handle_getShortcut(instance, loaded_recv, user: Users):
 
     with singine.Session() as session:
         this_shortcut = session.get(Shortcuts, shortcut_id)
-        this_pointed_path = session.get(PathStructures, this_shortcut.shortcut_valve)
+        if not this_shortcut:
+            instance.respond(404, "shortcut does not exist")
+            return
+
+        this_pointed_path = session.get(PathStructures, this_shortcut.short_value)
 
         pointed_type = None
         if this_pointed_path:
@@ -41,7 +46,7 @@ def handle_getShortcut(instance, loaded_recv, user: Users):
         instance.respond(
             0,
             msg="OK",
-            shortcut_value=this_shortcut.shortcut_valve,
+            shortcut_value=this_shortcut.short_value,
             pointed_type=pointed_type,
         )
 
@@ -72,15 +77,15 @@ def handle_operateShortcuts(instance, loaded_recv, user: Users):
 
             if (
                 session.query(Shortcuts)
-                .filter(Shortcuts.shortcut_id == shortcut_id)
+                .filter(Shortcuts.short_id == shortcut_id)
                 .all()
             ):
                 instance.respond(-1, "shortcut already exists")
                 return
 
             new_shortcut = Shortcuts(
-                shortcut_id=shortcut_id,
-                shortcut_value=shortcut_value,  # Note: We don't check whether the target is valid or not.
+                short_id=shortcut_id,
+                short_value=shortcut_value,  # Note: We don't check whether the target is valid or not.
                 owner=json.dumps(("user", user.username)),
             )
 

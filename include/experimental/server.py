@@ -929,6 +929,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
             attached_username = loaded_recv["auth"]["username"]
             self.this_time_token = attached_token
             self.this_time_username = attached_username
+
+            if not attached_token or not attached_username:
+                raise KeyError
         except KeyError:
             self.logger.debug("请求无效：认证数据不完整或缺失")
             self.send(
@@ -977,6 +980,8 @@ class SocketHandler(socketserver.BaseRequestHandler):
             "createGroup",
             "getUserProperties",
             "getFileRevisions",
+            "getShortcut",
+            "operateShortcut"
         )
 
         excluded_requests = ("refreshToken",)
