@@ -235,18 +235,19 @@ class DummyMD5Authorizer(DummyAuthorizer):
 
             # 查询
             g_cursor.execute("SELECT `path` FROM document_indexes WHERE `id` = ?", (file_id,))
-            real_file_path = ROOT_ABSPATH + g_cursor.fetchone()[0]
+            real_file_relative_path =  g_cursor.fetchone()[0]
 
-            if real_file_path:
+            if real_file_relative_path:
 
                 # 存储 fake ID 与路径的对应关系
-                files_dict[fake_id] = real_file_path
+                files_dict[fake_id] = ROOT_ABSPATH + real_file_relative_path
                 # fake_id 2 file_id
                 files_mapping_dict[fake_id] = file_id
 
                 if operation == "read":
                     # print("read mode detected")
-                    real_file_abspath = os.path.abspath(real_file_path)
+                    # real_file_abspath = os.path.abspath(real_file_path)
+                    real_file_abspath = ROOT_ABSPATH + real_file_relative_path
                     # print(real_file_abspath)
 
                     if not os.path.isfile(f"{fake_abspath}/{fake_id}"): # slow

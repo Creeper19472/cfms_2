@@ -36,7 +36,7 @@ def _permanentlyDeleteFile(fake_path_id, db_conn, g_cur):
     # 查询 document_indexes 表
 
     g_cur.execute(
-        "SELECT abspath FROM document_indexes WHERE id = ?", (index_file_id,)
+        "SELECT path FROM document_indexes WHERE id = ?", (index_file_id,)
     )
 
     index_query_result = g_cur.fetchall()

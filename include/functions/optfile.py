@@ -54,7 +54,7 @@ def permanentlyDeleteFile(instance, fake_path_id):  # TODO #15 更新操作至�
             this_index_file_id = revisions[revision_id]["file_id"]
 
             dboptr[1].execute(
-                "SELECT `abspath` FROM document_indexes WHERE `id` = ?",
+                "SELECT `path` FROM document_indexes WHERE `id` = ?",
                 (this_index_file_id,),
             )
 

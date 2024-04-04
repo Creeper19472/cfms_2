@@ -27,7 +27,7 @@ _db_name = config["database"]["mysql_db_name"]
 
 # TODO - 加入对多种数据库类型的支持，这需要对之前代码的大幅度改动
 engine = create_engine(
-    f"mysql+mysqldb://{_mysql_username}:{_mysql_password}@{_mysql_host}:{_mysql_port}/{_db_name}", pool_recycle=3600, echo=True)
+    f"mysql+mysqlconnector://{_mysql_username}:{_mysql_password}@{_mysql_host}:{_mysql_port}/{_db_name}", pool_recycle=3600, echo=True)
 
 from sqlalchemy.orm import sessionmaker
 Session = sessionmaker(bind=engine)
