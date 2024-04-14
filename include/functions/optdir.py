@@ -5,6 +5,7 @@ from include.bulitin_class.users import Users
 from include.connThread import PendingWriteFileError
 
 from include.database.operator import DatabaseOperator
+
 # from include.experimental.server import SocketHandler
 
 import time
@@ -24,7 +25,7 @@ def handle_getRootDir(instance, loaded_recv, user: Users):
         view_deleted = loaded_recv["data"].get("view_deleted", False)
 
         if view_deleted:  # 如果启用 view_deleted 选项
-            if not "view_deleted" in user.rights:
+            if "view_deleted" not in user.rights:
                 instance.respond(**instance.RES_ACCESS_DENIED)
                 return
 
@@ -54,7 +55,9 @@ def handle_getRootDir(instance, loaded_recv, user: Users):
                 if not view_deleted:
                     continue
 
-            if not instance.verifyUserAccess(i[0], "read", user):  # 检查该目录下的文件是否有权访问，如无则隐藏
+            if not instance.verifyUserAccess(
+                i[0], "read", user
+            ):  # 检查该目录下的文件是否有权访问，如无则隐藏
                 if instance.server.config["security"]["hide_when_no_access"]:
                     continue
                 else:
@@ -80,8 +83,9 @@ def handle_getRootDir(instance, loaded_recv, user: Users):
 
         return
 
+
 # def handle_operateDir(instance: SocketHandler, loaded_recv, user: Users):
-def handle_operateDir(instance, loaded_recv, user: Users):    
+def handle_operateDir(instance, loaded_recv, user: Users):
     if "data" not in loaded_recv:
         instance.respond(**instance.RES_MISSING_ARGUMENT)
         return
@@ -185,7 +189,9 @@ def handle_operateDir(instance, loaded_recv, user: Users):
             por_policy = Policies("permission_on_rootdir", *dboptr)
 
             if parent_id:
-                if instance.verifyUserAccess(parent_id, "read", user):  # 检查是否有权访问父级目录
+                if instance.verifyUserAccess(
+                    parent_id, "read", user
+                ):  # 检查是否有权访问父级目录
                     dboptr[1].execute(
                         "SELECT `name`, `type`, `properties` FROM path_structures WHERE `id` = ?",
                         (parent_id,),
@@ -205,7 +211,9 @@ def handle_operateDir(instance, loaded_recv, user: Users):
                     }
 
             else:  # 如果父级目录是根目录，检查是否有权访问根目录
-                instance.logger.debug(f"目录 {dir_id} 的上级目录为根目录。正在检查用户是否有权访问根目录...")
+                instance.logger.debug(
+                    f"目录 {dir_id} 的上级目录为根目录。正在检查用户是否有权访问根目录..."
+                )
 
                 por_access_rules = por_policy["rules"]["access_rules"]
                 por_external_access = por_policy["rules"]["external_access"]
@@ -221,7 +229,7 @@ def handle_operateDir(instance, loaded_recv, user: Users):
                         "name": "<root directory>",
                         "type": "dir",
                         "parent": True,
-                        "properties": {}
+                        "properties": {},
                         # "properties": instance.filterPathProperties(parent_properties)
                     }
 
@@ -293,7 +301,9 @@ def handle_operateDir(instance, loaded_recv, user: Users):
 
             instance.respond(**{"code": 0, "msg": "success"})
 
-        elif action == "recover":  # 会恢复其下的所有内容，无论其是否因删除此文件夹而被删除
+        elif (
+            action == "recover"
+        ):  # 会恢复其下的所有内容，无论其是否因删除此文件夹而被删除
             if dir_state["code"] != "deleted":
                 instance.respond(**{"code": -1, "msg": "Directory is not deleted"})
                 return
@@ -321,7 +331,9 @@ def handle_operateDir(instance, loaded_recv, user: Users):
                 return
 
             if new_parent_id == dir_id:
-                instance.respond(**{"code": -2, "msg": "一个目录的父级目录不能指向它自己"})
+                instance.respond(
+                    **{"code": -2, "msg": "一个目录的父级目录不能指向它自己"}
+                )
                 return
 
             # 判断新目录是否存在
@@ -422,6 +434,7 @@ def handle_operateDir(instance, loaded_recv, user: Users):
     else:
         instance.respond(**instance.RES_BAD_REQUEST)
 
+
 def handle_createDir(instance, loaded_recv, user: Users):
     if "data" not in loaded_recv:
         instance.respond(**instance.RES_MISSING_ARGUMENT)
@@ -431,9 +444,7 @@ def handle_createDir(instance, loaded_recv, user: Users):
         instance.respond(**instance.RES_ACCESS_DENIED)
         return
 
-    target_parent_id = loaded_recv["data"].get(
-        "parent_id", ""
-    )  # fallback to rootdir
+    target_parent_id = loaded_recv["data"].get("parent_id", "")  # fallback to rootdir
     target_id = loaded_recv["data"].get("dir_id", None)
     new_dirname = loaded_recv["data"].get("name", None)
 
@@ -449,24 +460,20 @@ def handle_createDir(instance, loaded_recv, user: Users):
         target_id = secrets.token_hex(16)
 
     ### 从这里继续
-        
+
     with DatabaseOperator(instance._pool) as dboptr:
 
-        dboptr[1].execute(
-            "SELECT 1 FROM path_structures WHERE `id` = ?", (target_id,)
-        )
+        dboptr[1].execute("SELECT 1 FROM path_structures WHERE `id` = ?", (target_id,))
 
         query_result = dboptr[1].fetchall()
 
         if query_result:
             instance.respond(
-               
                 **{
                     "code": -1,
                     "msg": "file or directory exists.",
                     "__hint__": "if you want to override a directory, use 'operateDir' instead.",
                 }
-
             )
             return
 
@@ -480,9 +487,7 @@ def handle_createDir(instance, loaded_recv, user: Users):
             dir_query_result = dboptr[1].fetchall()
 
             if not dir_query_result:
-                instance.respond(
-                    **{"code": 404, "msg": "target directory not found"}
-                )
+                instance.respond(**{"code": 404, "msg": "target directory not found"})
                 return
             elif len(dir_query_result) > 1:
                 raise RuntimeError("数据库出现了不止一条同id的记录")
@@ -544,7 +549,10 @@ def handle_createDir(instance, loaded_recv, user: Users):
 
         return
 
-def deleteDir(instance, dir_id, user: Users, delete_after=0, dboptr: DatabaseOperator = None):
+
+def deleteDir(
+    instance, dir_id, user: Users, delete_after=0, dboptr: DatabaseOperator = None
+):
 
     if not dboptr:
         dboptr = DatabaseOperator(instance._pool)
@@ -601,6 +609,7 @@ def deleteDir(instance, dir_id, user: Users, delete_after=0, dboptr: DatabaseOpe
     del dboptr
 
     return completed_list, failed_list
+
 
 def recoverDir(instance, dir_id, user: Users, dboptr: DatabaseOperator = None):
     # 注意：前后两个函数都不对用户是否有该文件夹权限做判断，应在 handle 部分完成

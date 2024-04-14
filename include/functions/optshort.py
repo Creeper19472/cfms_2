@@ -114,3 +114,14 @@ def handle_operateShortcuts(instance, loaded_recv, user: Users):
 
             instance.respond(instance.RES_OK)
             return
+
+    elif action == "rename":
+        if not "rename_shortcuts" in user.rights:
+            instance.respond(**instance.RES_ACCESS_DENIED)
+            return
+        
+        ## TODO
+
+    else:
+        instance.respond(400, msg=f"invaild action for operateShortcut: {action}")
+        return

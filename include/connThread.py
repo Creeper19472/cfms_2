@@ -1,4 +1,6 @@
 # connThread.py
+# No longer in use and is no logger supported. Will be removed in future versions but
+# still in the place for now for historical references.
 
 from functools import wraps
 import os
@@ -92,7 +94,9 @@ class ConnHandler:
 
     RES_BAD_REQUEST = {"code": 400, "msg": "bad request"}
 
-    def __init__(self, thread_name, *args, **kwargs):  #!!注意，self.thread_name 在调用类定义！
+    def __init__(
+        self, thread_name, *args, **kwargs
+    ):  #!!注意，self.thread_name 在调用类定义！
         self.root_abspath = kwargs["root_abspath"]
 
         self.args = args
@@ -181,7 +185,9 @@ class ConnHandler:
         self.log.logger.debug(f"raw message to send: {msg}")
         msg_to_send = msg.encode()
         if self.encrypted_connection:
-            encrypted_data = self.aes_encrypt(msg, self.aes_key)  # aes_encrypt() 接受文本
+            encrypted_data = self.aes_encrypt(
+                msg, self.aes_key
+            )  # aes_encrypt() 接受文本
             self.conn.sendall(encrypted_data)
         else:
             self.conn.sendall(msg_to_send)
@@ -315,7 +321,9 @@ class ConnHandler:
 
         # 如果已经删除
         for per_revision in sorted_revisions:  # per_revision is a tuple
-            if per_revision[1]["state"]["code"] == "deleted":  # 我们假定用户希望得到最新的版本是未被删除的
+            if (
+                per_revision[1]["state"]["code"] == "deleted"
+            ):  # 我们假定用户希望得到最新的版本是未被删除的
                 continue
             # 指定 newest
             newest_revision = per_revision
@@ -406,7 +414,9 @@ class ConnHandler:
                 self.__send(json.dumps({"code": -1, "msg": "unsupported API version"}))
                 continue
 
-        self.log.logger.debug(f"terminate_event 被激活，正在终止线程 {self.thread_name}...")
+        self.log.logger.debug(
+            f"terminate_event 被激活，正在终止线程 {self.thread_name}..."
+        )
 
         self.log.logger.debug("正在终止与客户端和数据库的连接...")
         self.conn.close()
@@ -481,7 +491,9 @@ class ConnHandler:
                     if user.hasGroups((i,)):  # 如果用户存在于此用户组
                         return True
 
-            if user.username in external_access["users"].keys():  # 如果用户在字典中有记录
+            if (
+                user.username in external_access["users"].keys()
+            ):  # 如果用户在字典中有记录
                 if (
                     action
                     in (
@@ -549,7 +561,9 @@ class ConnHandler:
                 query_result = fq_cur.fetchall()
 
                 if query_result and not force_write:
-                    raise PendingWriteFileError("文件存在至少一需要写入的任务，且该任务尚未完成")
+                    raise PendingWriteFileError(
+                        "文件存在至少一需要写入的任务，且该任务尚未完成"
+                    )
 
             insert_list.append(
                 (
@@ -599,7 +613,9 @@ class ConnHandler:
 
         return True
 
-    def permanentlyDeleteFile(self, fake_path_id):  # TODO #15 更新操作至适配 revision 的版本
+    def permanentlyDeleteFile(
+        self, fake_path_id
+    ):  # TODO #15 更新操作至适配 revision 的版本
         g_cur = self.db_cursor
 
         # 查询文件信息
@@ -801,7 +817,9 @@ class ConnHandler:
         if len(query_result) == 0:
             raise FileNotFoundError
         elif len(query_result) > 1:
-            raise RuntimeError("在执行 getFileSize 操作时发现数据库出现相同ID的多条记录")
+            raise RuntimeError(
+                "在执行 getFileSize 操作时发现数据库出现相同ID的多条记录"
+            )
 
         this_file_result = query_result[0]
 
@@ -810,7 +828,9 @@ class ConnHandler:
 
         if not rev_id:
             rev_id = self._getNewestRevisionID(path_id)
-            if not rev_id:  # 如果自动获取了ID却仍然为空（代表没有满足条件的结果），则不计算大小
+            if (
+                not rev_id
+            ):  # 如果自动获取了ID却仍然为空（代表没有满足条件的结果），则不计算大小
                 return -1
 
         # index_file_id = this_file_result[1]
@@ -835,7 +855,9 @@ class ConnHandler:
         if len(query_result) == 0:
             raise FileNotFoundError("在 document_indexes 表中未发现对应的数据")
         elif len(query_result) > 1:
-            raise RuntimeError("在执行 getFileSize 操作时发现数据库出现相同ID的多条记录")
+            raise RuntimeError(
+                "在执行 getFileSize 操作时发现数据库出现相同ID的多条记录"
+            )
 
         this_real_file_result = query_result[0]
 
@@ -941,7 +963,9 @@ class ConnHandler:
             if result[0][3] != "dir":
                 raise TypeError("Not a directory: does not support _subcall")
 
-            if not access_rules.get("__subinherit__", True):  # 如果设置为下层不继承（对于文件应该无此设置）
+            if not access_rules.get(
+                "__subinherit__", True
+            ):  # 如果设置为下层不继承（对于文件应该无此设置）
                 self.log.logger.debug("本层设置为下层不继承，返回为真")
                 return True
 
@@ -977,7 +1001,9 @@ class ConnHandler:
         else:
             self.log.logger.debug("请求操作在该路径上被设置为不继承上层设置，跳过")
 
-        self.log.logger.debug(f"所有访问规则和附加权限记录：{access_rules}, {external_access}")
+        self.log.logger.debug(
+            f"所有访问规则和附加权限记录：{access_rules}, {external_access}"
+        )
 
         if self._verifyAccess(
             user, action, access_rules, external_access, check_deny=checkdeny
@@ -1004,7 +1030,9 @@ class ConnHandler:
                 self.__send(json.dumps({"code": -1, "msg": "invaild arguments"}))
                 return
             except ValueError:
-                self.log.logger.debug("提交的请求没有提供用户名或密码（可能 data 下对应键值为空）")
+                self.log.logger.debug(
+                    "提交的请求没有提供用户名或密码（可能 data 下对应键值为空）"
+                )
                 self.__send(
                     json.dumps({"code": -2, "msg": "no username or password provided"})
                 )
@@ -1060,7 +1088,7 @@ class ConnHandler:
             "operateUser": self.handle_operateUser,
             "getRootDir": self.handle_getRootDir,
             "getPolicy": self.handle_getPolicy,
-            "getAvatar": self.handle_getAvatar, 
+            "getAvatar": self.handle_getAvatar,
             "createFile": self.handle_createFile,
             "createUser": self.handle_createUser,
             "createDir": self.handle_createDir,
@@ -1198,7 +1226,9 @@ class ConnHandler:
                 if not view_deleted:
                     continue
 
-            if not self.verifyUserAccess(i[0], "read", user):  # 检查该目录下的文件是否有权访问，如无则隐藏
+            if not self.verifyUserAccess(
+                i[0], "read", user
+            ):  # 检查该目录下的文件是否有权访问，如无则隐藏
                 if self.config["security"]["hide_when_no_access"]:
                     continue
                 else:
@@ -1639,7 +1669,9 @@ class ConnHandler:
         # 正式处理对文件的操作，实际指向确定的 rev
         # 获取 revision <- getFileRevisions()
 
-        self.log.logger.debug(f"请求对文件版本ID {specified_revision_id} 的操作：{req_action}")
+        self.log.logger.debug(
+            f"请求对文件版本ID {specified_revision_id} 的操作：{req_action}"
+        )
 
         if req_action in [
             "read",
@@ -1700,7 +1732,9 @@ class ConnHandler:
 
                 self.__send(json.dumps(response))
 
-            elif req_action == "write":  # 该操作将使得最新版本的 revision 指向给定的文件
+            elif (
+                req_action == "write"
+            ):  # 该操作将使得最新版本的 revision 指向给定的文件
                 do_force_write = loaded_recv["data"].get("force_write", False)
 
                 if file_state_code := file_state["code"] != "ok":
@@ -2192,7 +2226,9 @@ class ConnHandler:
 
         group_policy = Policies("group_settings", self.db_conn, self.db_cursor)
 
-        if new_group_rights != None or new_group_enabled != None:  # 不为未提供的，因提供空列表也是一种提交
+        if (
+            new_group_rights != None or new_group_enabled != None
+        ):  # 不为未提供的，因提供空列表也是一种提交
             if not user.hasRights(("custom_new_group_settings",)):
                 self.__send(json.dumps(self.RES_ACCESS_DENIED))
                 return
@@ -2414,7 +2450,9 @@ class ConnHandler:
                 )
 
                 if parent_id:
-                    if self.verifyUserAccess(parent_id, "read", user):  # 检查是否有权访问父级目录
+                    if self.verifyUserAccess(
+                        parent_id, "read", user
+                    ):  # 检查是否有权访问父级目录
                         handle_cursor.execute(
                             "SELECT `name`, `type`, `properties` FROM path_structures WHERE `id` = ?",
                             (parent_id,),
@@ -2434,7 +2472,9 @@ class ConnHandler:
                         }
 
                 else:  # 如果父级目录是根目录，检查是否有权访问根目录
-                    self.log.logger.debug(f"目录 {dir_id} 的上级目录为根目录。正在检查用户是否有权访问根目录...")
+                    self.log.logger.debug(
+                        f"目录 {dir_id} 的上级目录为根目录。正在检查用户是否有权访问根目录..."
+                    )
 
                     por_access_rules = por_policy["rules"]["access_rules"]
                     por_external_access = por_policy["rules"]["external_access"]
@@ -2450,7 +2490,7 @@ class ConnHandler:
                             "name": "<root directory>",
                             "type": "dir",
                             "parent": True,
-                            "properties": {}
+                            "properties": {},
                             # "properties": self.filterPathProperties(parent_properties)
                         }
 
@@ -2522,7 +2562,9 @@ class ConnHandler:
 
                 self.__send(json.dumps({"code": 0, "msg": "success"}))
 
-            elif action == "recover":  # 会恢复其下的所有内容，无论其是否因删除此文件夹而被删除
+            elif (
+                action == "recover"
+            ):  # 会恢复其下的所有内容，无论其是否因删除此文件夹而被删除
                 if dir_state["code"] != "deleted":
                     self.__send(
                         json.dumps({"code": -1, "msg": "Directory is not deleted"})
@@ -2552,7 +2594,11 @@ class ConnHandler:
                     return
 
                 if new_parent_id == dir_id:
-                    self.__send(json.dumps({"code": -2, "msg": "一个目录的父级目录不能指向它自己"}))
+                    self.__send(
+                        json.dumps(
+                            {"code": -2, "msg": "一个目录的父级目录不能指向它自己"}
+                        )
+                    )
                     return
 
                 # 判断新目录是否存在
@@ -2567,7 +2613,9 @@ class ConnHandler:
                 query_result = handle_cursor.fetchall()
 
                 if len(query_result) == 0:
-                    self.__send(json.dumps({"code": 404, "msg": "没有找到请求的新目录"}))
+                    self.__send(
+                        json.dumps({"code": 404, "msg": "没有找到请求的新目录"})
+                    )
                     return
                 elif len(query_result) != 1:
                     raise ValueError("意料之外的记录数量")
@@ -3026,7 +3074,9 @@ class ConnHandler:
             self.__send(json.dumps(self.RES_NOT_FOUND))
             return
 
-        if not self.verifyUserAccess(file_id, "read", user):  # 目前仅要求用户具有 read 权限，未来可能细化
+        if not self.verifyUserAccess(
+            file_id, "read", user
+        ):  # 目前仅要求用户具有 read 权限，未来可能细化
             self.__send(json.dumps(self.RES_ACCESS_DENIED))
             return
 

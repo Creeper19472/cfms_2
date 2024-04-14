@@ -1,19 +1,15 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "240404_alpha")
-READABLE_VERSION = (
-    f"{CORE_VERSION[0]}.{CORE_VERSION[1]}.{CORE_VERSION[2]}.{CORE_VERSION[3]}"
-)
+CORE_VERSION = (1, 0, 0, "240405_alpha")
+READABLE_VERSION = ".".join(map(str, CORE_VERSION))
 
-
-# import importlib
+__all__ = []  # Not designed for module-like use
 
 import logging
 import sys, os, socket, gettext, time, threading
 import tomllib
 from include.initialize_scripts.initialize import initDatabaseStructure
-import include.logtool as logtool
-from include.connThread import *
+from include.logtool import getCustomLogger
 
 import include.fileftp.pyftpd as pyftpd
 import include.taskScheduler as taskScheduler
@@ -22,8 +18,9 @@ import secrets
 
 # from apscheduler.schedulers.background import BackgroundScheduler
 from include.database.abstracted import getDBConnection
-
 from include.database.pool import getDBPool
+
+import locale
 
 # 开发模式开关
 DEBUG = False
@@ -53,7 +50,7 @@ def stopsocket():
 def consoled():
     """控制台
     若要添加控制台指令,在字典command_dict中添加即可"""
-    log.logger.info("Command example: [command]; ")
+    logger.info("Command example: [command]; ")
     while True:
         try:
             i = input(">")
@@ -68,12 +65,12 @@ def consoled():
 
 # 获取初始绝对路径
 # 结果最后不带斜杠，需要手动添加
-root_abspath = os.path.dirname(os.path.abspath(__file__))
+ROOT_ABSPATH = os.path.dirname(os.path.abspath(__file__))
 
-# print(root_abspath)
+# print(ROOT_ABSPATH)
 ## 开始执行初始化过程
 
-log = logtool.LogClass(logname="main", filepath="".join((root_abspath, "/main.log")))
+logger = getCustomLogger(logname="main", filepath="".join((ROOT_ABSPATH, "/main.log")))
 
 if __name__ == "__main__":
     # 如果被作为主程序运行，就开始面向前台的准备过程
@@ -83,29 +80,28 @@ if __name__ == "__main__":
         with open("config.toml", "rb") as f:
             config = tomllib.load(f)
     except FileNotFoundError as error:
-        log.logger.fatal(f"{error}")
-        log.logger.fatal("Terminating program running!")
+        logger.critical(f"{error}")
+        logger.critical("Terminating program running!")
         sys.exit()
 
     if config["debug"]["debug"]:
         DEBUG = True
 
-        log.cshandler.setLevel(logging.DEBUG)
-        log.logger.info("Debug mode enabled.")
-    
-    log.logger.debug(f"config: {config}")
+        for each_handler in logger.handlers:
+            each_handler.setLevel(logging.DEBUG)
 
-    starttime = time.time()  # 这里还有个endtime，但我懒得写了
+        logger.info("Debug mode enabled.")
 
-    log.logger.info("Starting Classified File Management System - Server...")
-    # log.logger.info(f"Server time:{starttime}")
-    log.logger.info(f"Version {READABLE_VERSION}")
-    log.logger.info("Running On: Python %s" % sys.version)
+    starttime = time.time()
+
+    logger.info("Starting Classified File Management System - Server...")
+    # logger.info(f"Server time:{starttime}")
+    logger.info(f"Version {READABLE_VERSION}")
+    logger.info(f"Running On: Python {sys.version}")
     if sys.version_info < (3, 11):  # 基于Python 3.11 开发，因此低于此版本就无法运行
-        log.logger.fatal("您正在运行的 Python 版本低于本系统的最低要求 (>=3.11)。")
-        log.logger.fatal("由于此原因，程序无法继续。")
+        logger.critical("您正在运行的 Python 版本低于本系统的最低要求 (>=3.11)。")
+        logger.critical("由于此原因，程序无法继续。")
         sys.exit()
-
 
     db_type = config["database"]["db_type"]
 
@@ -146,13 +142,11 @@ if __name__ == "__main__":
     # 初始化 token_secret
     if config["security"]["update_token_secret_at_startup"]:
         with open(
-            f"{root_abspath}/content/auth/token_secret", "+a"
+            f"{ROOT_ABSPATH}/content/auth/token_secret", "+a"
         ) as ts_file:  # 这个文件的重要性和 pri.pem 是一样的
             ts_file.truncate(0)  # 清空
             ts_file.write(secrets.token_hex(128))
 
-    # server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
     ipv4_addr = (config["connect"]["ipv4_addr"], config["connect"]["port"])
     ipv6_addr = (config["connect"]["ipv6_addr"], config["connect"]["port"])
 
@@ -161,57 +155,54 @@ if __name__ == "__main__":
 
     sem = threading.Semaphore(semaphore_count)
 
-    # if config["connect"]["ipv4_enabled"]:
-    #     server.bind(ipv4_addr)
-    #     server.listen(max_queue)
-    # if config["connect"]["ipv6_enabled"]:
-    #     server.bind(ipv6_addr)
-    #     server.listen(max_queue)
-
     if config["connect"]["ipv4_enabled"]:
-        log.logger.info((f"IPv4 Address: {ipv4_addr}"))
+        logger.info((f"IPv4 Address: {ipv4_addr}"))
     else:
-        log.logger.info(("IPv4 is not supported."))
+        logger.info(("IPv4 is not supported."))
     if config["connect"]["ipv6_enabled"]:
-        log.logger.info((f"IPv6 Address: {ipv6_addr}"))
+        logger.info((f"IPv6 Address: {ipv6_addr}"))
     else:
-        log.logger.info(("IPv6 is not supported."))
+        logger.info(("IPv6 is not supported."))
 
     from include.experimental.server import ThreadedSocketServer, SocketHandler
 
     # 由于启动主服务会导致阻塞，因此所有线程操作必须提前启动
 
     # 初始化 FTPServer
-    log.logger.info(f'正在初始化 FTP 服务... 端口开放在 {config["connect"]["ftp_port"]}.')
+    logger.info(f'正在初始化 FTP 服务... 端口开放在 {config["connect"]["ftp_port"]}.')
     FTPServerThread = threading.Thread(
         target=pyftpd.main,
         args=(
-            root_abspath,
+            ROOT_ABSPATH,
             terminate_event,
             (config["connect"]["ipv4_addr"], config["connect"]["ftp_port"]),
             SYS_LOCKS,
             db_pool,
         ),
         name="FTPServerThread",
+        daemon=True
     )
     FTPServerThread.start()
 
     # 初始化 Cron
-    log.logger.info("正在注册计划任务...")
+    logger.info("正在注册计划任务...")
     SchedulerThread = threading.Thread(
         target=taskScheduler.main,
-        args=(root_abspath, terminate_event, db_pool),
+        args=(ROOT_ABSPATH, terminate_event, db_pool),
         name="SchedulerThread",
+        daemon=True
     )
     SchedulerThread.start()
 
     endtime = time.time()
-    log.logger.info(f"完成（{endtime - starttime} s）！正在启动主要服务。")
+    logger.info(f"完成（{endtime - starttime} s）！正在启动主要服务。")
 
-    with ThreadedSocketServer(ipv4_addr, SocketHandler, server_config=config, db_pool=db_pool) as server:
-        # Activate the server; this will keep running until you
-        # interrupt the program with Ctrl-C
-        # server._db_pool = db_pools
+    with ThreadedSocketServer(
+        ipv4_addr, SocketHandler, server_config=config, db_pool=db_pool
+    ) as server:
+        # Activate the server; this will keep running
         server.serve_forever()
+
+    logger.info("Shutdown triggered. Exiting")
 
     sys.exit()

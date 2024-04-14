@@ -3,7 +3,7 @@ from __future__ import unicode_literals, absolute_import
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, String, VARCHAR, Text
 
-ModelBase = declarative_base()  # <-元类
+ModelBase = declarative_base()  # <- MetaClass
 
 
 class PathStructures(ModelBase):

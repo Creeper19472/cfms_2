@@ -3,6 +3,8 @@
 
 # 提供实验性的单例模式的用以支持 ORM 架构的模块。
 
+__all__ = ['engine', 'Session']
+
 from sqlalchemy import create_engine
 import tomllib, sys, os
 

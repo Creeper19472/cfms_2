@@ -86,13 +86,12 @@ class Users:
                         )
                 else:
                     raise RuntimeError(f"Invaild permission type: {each_perm[1]}")
-                
-                
+
             # 默认包含 user 组
             self.groups.add("user")
 
             # 载入用户组所包含的权限
-                
+
             for i in self.groups:
 
                 # print(98, f"group {i}")
@@ -117,7 +116,6 @@ class Users:
 
             self.rights -= _revoked_rights
             self.rights -= _group_revoked_rights
-            
 
             # 载入 metadata - TODO
 

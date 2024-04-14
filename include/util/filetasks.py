@@ -10,6 +10,8 @@ import datetime
 from include.bulitin_class.errors import PendingWriteFileError
 from include.database.operator import DatabaseOperator
 
+__all__ = ['createFileIndex', 'createFileTask', 'cancelFileTask']
+
 def createFileIndex(instance, new_index_id: str | None = None):
 
     with DatabaseOperator(instance._pool) as dboptr:

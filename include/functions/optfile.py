@@ -1,4 +1,3 @@
-
 import datetime
 import os
 import secrets
@@ -9,6 +8,7 @@ from include.bulitin_class.users import Users
 from include.connThread import PendingWriteFileError
 
 from include.database.operator import DatabaseOperator
+
 # from include.experimental.server import SocketHandler
 
 import time
@@ -20,8 +20,11 @@ from include.util.filetasks import createFileIndex, createFileTask, cancelFileTa
 
 # 由于 sockethandler 不能循环导入，所以实际运行的代码不能有相应类型注释
 
-def permanentlyDeleteFile(instance, fake_path_id):  # TODO #15 更新操作至适配 revision 的版本
-    
+
+def permanentlyDeleteFile(
+    instance, fake_path_id
+):  # TODO #15 更新操作至适配 revision 的版本
+
     with DatabaseOperator(instance._pool) as dboptr:
 
         # 查询文件信息
@@ -104,6 +107,7 @@ def permanentlyDeleteFile(instance, fake_path_id):  # TODO #15 更新操作至�
 
     return True
 
+
 # def handle_operateFile(instance: SocketHandler, loaded_recv, user: Users):
 def handle_operateFile(instance, loaded_recv, user: Users):
 
@@ -142,7 +146,7 @@ def handle_operateFile(instance, loaded_recv, user: Users):
 
         result = dboptr[1].fetchall()
 
-    del dboptr # 避免识别上误以为已经定义
+    del dboptr  # 避免识别上误以为已经定义
 
     if not len(result):
         instance.respond(**{"code": -1, "msg": "no such file"})
@@ -182,7 +186,9 @@ def handle_operateFile(instance, loaded_recv, user: Users):
 
         # 如果已经删除
         for per_revision in sorted_revisions:  # per_revision is a tuple
-            if per_revision[1]["state"]["code"] == "deleted":  # 我们假定用户希望得到最新的版本是未被删除的
+            if (
+                per_revision[1]["state"]["code"] == "deleted"
+            ):  # 我们假定用户希望得到最新的版本是未被删除的
                 continue
             # 指定 newest
             newest_revision = per_revision
@@ -203,18 +209,14 @@ def handle_operateFile(instance, loaded_recv, user: Users):
     else:  # 如果已经指定
         # 判断是否有该 rev
         if specified_revision_id not in query_revisions:
-            instance.respond(
-                404, msg="specified revision not found"
-                )
+            instance.respond(404, msg="specified revision not found")
             return
 
         # 判断 rev 版本是否被删除（在特别指定了 rev_id 的时候才会出现）
 
         if query_revisions[specified_revision_id]["state"] == "deleted":
             if not view_deleted:
-                instance.respond(
-                    404, msg="specified revision not found"
-                )
+                instance.respond(404, msg="specified revision not found")
                 return
 
         specified_revision_data: dict = query_revisions[specified_revision_id]
@@ -222,7 +224,9 @@ def handle_operateFile(instance, loaded_recv, user: Users):
     # 正式处理对文件的操作，实际指向确定的 rev
     # 获取 revision <- getFileRevisions()
 
-    instance.logger.debug(f"请求对文件版本ID {specified_revision_id} 的操作：{req_action}")
+    instance.logger.debug(
+        f"请求对文件版本ID {specified_revision_id} 的操作：{req_action}"
+    )
 
     if req_action in [
         "read",
@@ -267,7 +271,9 @@ def handle_operateFile(instance, loaded_recv, user: Users):
                 username=user.username,
             )
 
-            mapping = {file_id: specified_revision_file_id}  # 伪路径文件ID: 该版本 index 表 文件ID
+            mapping = {
+                file_id: specified_revision_file_id
+            }  # 伪路径文件ID: 该版本 index 表 文件ID
 
             response = {
                 "code": 0,
@@ -290,25 +296,18 @@ def handle_operateFile(instance, loaded_recv, user: Users):
                     instance.respond(
                         -1,
                         msg="file locked",
-                        data={
-                            "expire_time": file_state.get("expire_time", 0)
-                        },                
+                        data={"expire_time": file_state.get("expire_time", 0)},
                     )
 
                 elif file_state_code == "deleted":
                     instance.respond(
                         -1,
-                        msg = "The file has been marked for deletion, please restore it first",
-                        data = {
-                            "expire_time": file_state.get("expire_time", 0)
-                        },        
+                        msg="The file has been marked for deletion, please restore it first",
+                        data={"expire_time": file_state.get("expire_time", 0)},
                     )
-                    
 
                 else:
-                    instance.respond(
-                        -1, msg="unexpected file status"
-                    )
+                    instance.respond(-1, msg="unexpected file status")
 
                 return
 
@@ -400,15 +399,13 @@ def handle_operateFile(instance, loaded_recv, user: Users):
 
             if file_state_code := file_state["code"] != "ok":
                 if file_state_code == "locked":
-                    instance.respond(    
+                    instance.respond(
                         -1,
-                        msg = "file locked",
-                        data = {
-                            "expire_time": file_state.get("expire_time", 0)
-                        },
+                        msg="file locked",
+                        data={"expire_time": file_state.get("expire_time", 0)},
                     )
                     return
-                
+
             with DatabaseOperator(instance._pool) as dboptr:
 
                 dboptr[1].execute(
@@ -665,6 +662,7 @@ def handle_operateFile(instance, loaded_recv, user: Users):
         instance.logger.debug("请求的操作不存在。")
         return
 
+
 def handle_createFile(instance, loaded_recv, user: Users):
     if "data" not in loaded_recv:
         instance.respond(**instance.RES_MISSING_ARGUMENT)
@@ -679,7 +677,7 @@ def handle_createFile(instance, loaded_recv, user: Users):
 
     if target_file_path_id:
         if len(target_file_path_id) > 64:
-            instance.respond(-1, msg = "file id too long")
+            instance.respond(-1, msg="file id too long")
             return
     else:
         target_file_path_id = secrets.token_hex(8)
@@ -694,13 +692,11 @@ def handle_createFile(instance, loaded_recv, user: Users):
 
         if query_result:
             instance.respond(
-                
                 **{
                     "code": -1,
                     "msg": "file or directory exists.",
                     "__hint__": "if you want to override a file, use 'operateFile' instead.",
                 }
-                
             )
             return
 
@@ -715,9 +711,7 @@ def handle_createFile(instance, loaded_recv, user: Users):
             dir_query_result = dboptr[1].fetchall()
 
             if not dir_query_result:
-                instance.respond(
-                    **{"code": 404, "msg": "target directory not found"}
-                )
+                instance.respond(**{"code": 404, "msg": "target directory not found"})
                 return
             elif len(dir_query_result) > 1:
                 raise RuntimeError("数据库出现了不止一条同id的记录")
@@ -756,16 +750,14 @@ def handle_createFile(instance, loaded_recv, user: Users):
 
         today = datetime.date.today()
 
-        destination_path = (
-            f"/content/files/{today.year}/{today.month}"
-        )
+        destination_path = f"/content/files/{today.year}/{today.month}"
 
         destination_abspath = instance.server.root_abspath + destination_path
 
         os.makedirs(destination_abspath, exist_ok=True)  # 即使文件夹已存在也加以继续
 
         with open(f"{destination_abspath}/{real_filename}", "w") as new_file:
-            pass # 创建一个空白文件，以防仅创建不上传
+            pass  # 创建一个空白文件，以防仅创建不上传
 
         # 注册数据库条目
 
@@ -822,7 +814,6 @@ def handle_createFile(instance, loaded_recv, user: Users):
         )
 
         instance.respond(
-            
             **{
                 "code": 0,
                 "msg": "file created",
@@ -833,12 +824,12 @@ def handle_createFile(instance, loaded_recv, user: Users):
                     "expire_time": expire_time,
                 },
             }
-        
         )
 
     del dboptr
 
     return
+
 
 def handle_getFileRevisions(instance, loaded_recv, user: Users):
     try:
@@ -847,9 +838,7 @@ def handle_getFileRevisions(instance, loaded_recv, user: Users):
         reverse: bool = bool(
             loaded_recv["data"].get("reverse", True)
         )  # 反序，默认开启 - 按从新到旧排序
-        item_range: tuple[int, int] = tuple(
-            loaded_recv["data"].get("item_range", ())
-        )
+        item_range: tuple[int, int] = tuple(loaded_recv["data"].get("item_range", ()))
     except KeyError:
         instance.respond(**instance.RES_MISSING_ARGUMENT)
         return
@@ -859,7 +848,9 @@ def handle_getFileRevisions(instance, loaded_recv, user: Users):
         instance.respond(**instance.RES_NOT_FOUND)
         return
 
-    if not instance.verifyUserAccess(file_id, "read", user):  # 目前仅要求用户具有 read 权限，未来可能细化
+    if not instance.verifyUserAccess(
+        file_id, "read", user
+    ):  # 目前仅要求用户具有 read 权限，未来可能细化
         instance.respond(**instance.RES_ACCESS_DENIED)
         return
 
@@ -882,9 +873,7 @@ def handle_getFileRevisions(instance, loaded_recv, user: Users):
         return
 
     if (max_count := item_range[1] - item_range[0]) > 50:
-        instance.respond(
-            400, msg="max revision count out of range"
-        )
+        instance.respond(400, msg="max revision count out of range")
         return
 
     with DatabaseOperator(instance._pool) as dboptr:
@@ -939,7 +928,4 @@ def handle_getFileRevisions(instance, loaded_recv, user: Users):
             final_revisions[this_revision_id] = this_revision_data
             _k += 1
 
-    instance.respond(
-        0, msg="ok", data={"revisions": final_revisions}
-    )
-
+    instance.respond(0, msg="ok", data={"revisions": final_revisions})

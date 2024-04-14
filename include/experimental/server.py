@@ -6,17 +6,14 @@ import secrets
 import socket
 import socketserver
 import json
-from socketserver import BaseRequestHandler, BaseServer
 
 import os
-import sqlite3
 import sys
 import threading
 import time
 import tomllib
 import traceback
-import rsa
-from typing import Any, Self
+from typing import Self
 
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
@@ -259,87 +256,86 @@ class SocketHandler(socketserver.BaseRequestHandler):
             self.send("Unknown request")
             raise ProgrammedSystemExit
 
-        available_key_exchange_methods = ["rsa", "x25519"] # 预先定义可用的方法
+        # available_key_exchange_methods = ["rsa", "x25519"] # 预先定义可用的方法
 
-        if (ukem:=self.config["security"]["use_key_exchange_method"]) in available_key_exchange_methods:
-            if ukem == "rsa":
-                self.send(
-                    json.dumps(
-                        {
-                            "msg": "enableEncryption",
-                            "method": "rsa",
-                            "public_key": self.public_key.export_key("PEM").decode(),
-                            "code": 0,
-                        }
-                    )
+        if ukem:=self.config["security"]["use_key_exchange_method"] == "rsa":
+            self.send(
+                json.dumps(
+                    {
+                        "msg": "enableEncryption",
+                        "method": "rsa",
+                        "public_key": self.public_key.export_key("PEM").decode(),
+                        "code": 0,
+                    }
                 )
+            )
 
-                receive_encrypted = self.request.recv(
-                    self.server.BUFFER_SIZE
-                )  # 这里还不能用 self.recv() 方法：是加密的, 无法decode()
+            receive_encrypted = self.request.recv(
+                self.server.BUFFER_SIZE
+            )  # 这里还不能用 self.recv() 方法：是加密的, 无法decode()
 
-                decrypted_data = self.pri_cipher.decrypt(receive_encrypted)  # 得到AES密钥
+            decrypted_data = self.pri_cipher.decrypt(receive_encrypted)  # 得到AES密钥
 
-                # self.logger.debug(f"AES Key: {decrypted_data}")
+            # self.logger.debug(f"AES Key: {decrypted_data}")
 
-                self.aes_key = decrypted_data
-                self.encrypted_connection = True
-                
-            elif ukem == "x25519":
-                # It is recommended that a client generates a randomized private key when connecting
-                # to the server in order to ensure safety. 
+            self.aes_key = decrypted_data
+            self.encrypted_connection = True
+            
+        elif ukem == "x25519":
+            # It is recommended that a client generates a randomized private key when connecting
+            # to the server in order to ensure safety. 
 
-                from cryptography.hazmat.primitives import hashes
-                from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
-                from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-                
-                with open(f"{self.server.root_abspath}/content/auth/x25519_pri", "rb") as x_pri_file:
-                    x_pri_bytes = x_pri_file.read()
+            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+            from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+            
+            with open(f"{self.server.root_abspath}/content/auth/x25519_pri", "rb") as x_pri_file:
+                x_pri_bytes = x_pri_file.read()
 
-                x_private_key = X25519PrivateKey.from_private_bytes(x_pri_bytes)
-                x_public_key = x_private_key.public_key()
-                x_pub_raw = x_public_key.public_bytes_raw()
+            x_private_key = X25519PrivateKey.from_private_bytes(x_pri_bytes)
+            x_public_key = x_private_key.public_key()
+            x_pub_raw = x_public_key.public_bytes_raw()
 
-                self.send(
-                    json.dumps(
-                        {
-                            "msg": "enableEncryption",
-                            "method": "x25519",
-                            "public_key": x_pub_raw.hex(), # json 格式只能使用 str 模式发送
-                            "code": 0,
-                        }
-                    )
+            self.send(
+                json.dumps(
+                    {
+                        "msg": "enableEncryption",
+                        "method": "x25519",
+                        "public_key": x_pub_raw.hex(), # json 格式只能使用 str 模式发送
+                        "code": 0,
+                    }
                 )
+            )
 
-                receive_encrypted = self.request.recv(
-                    self.server.BUFFER_SIZE
-                )  
+            receive_encrypted = self.request.recv(
+                self.server.BUFFER_SIZE
+            )  
 
-                peer_public_key = X25519PublicKey.from_public_bytes(receive_encrypted)
+            peer_public_key = X25519PublicKey.from_public_bytes(receive_encrypted)
 
-                shared_key: bytes = x_private_key.exchange(peer_public_key)
+            shared_key: bytes = x_private_key.exchange(peer_public_key)
 
-                # TODO: 实现对多种对称加密模式的支持
-                
-                self.aes_key = shared_key # 先用协商密钥为双向加密密钥发送新密钥
-                self.encrypted_connection = True
+            # TODO: 实现对多种对称加密模式的支持
+            
+            self.aes_key = shared_key # 先用协商密钥为双向加密密钥发送新密钥
+            self.encrypted_connection = True
 
-                # # self.x25519_shared_
-                derived_key = HKDF(
-                    algorithm=hashes.SHA256(),
-                    length=32,
-                    salt=secrets.token_bytes(16),
-                    info=b'handshake data',
-                ).derive(shared_key)
+            # # self.x25519_shared_
+            derived_key = HKDF(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=secrets.token_bytes(16),
+                info=b'handshake data',
+            ).derive(shared_key)
 
-                self.send(derived_key.hex()) # 发送导出密钥
-                self.aes_key = derived_key
+            self.send(derived_key.hex()) # 发送导出密钥
+            self.aes_key = derived_key
 
-                try: self.recv() # 要求客户端发送有效回执
-                except: raise ProgrammedSystemExit
+            try: self.recv() # 要求客户端发送有效回执
+            except: raise ProgrammedSystemExit
 
-            else:
-                raise RuntimeError
+        else:
+            raise RuntimeError
 
         return
 
