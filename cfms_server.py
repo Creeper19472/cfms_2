@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "240405_alpha")
+CORE_VERSION = (1, 0, 0, "240504_alpha")
 READABLE_VERSION = ".".join(map(str, CORE_VERSION))
 
 __all__ = []  # Not designed for module-like use
@@ -20,7 +20,6 @@ import secrets
 from include.database.abstracted import getDBConnection
 from include.database.pool import getDBPool
 
-import locale
 
 # 开发模式开关
 DEBUG = False
@@ -32,35 +31,6 @@ terminate_event = threading.Event()
 SYS_IOLOCK = threading.RLock()
 
 SYS_LOCKS = {"SYS_IOLOCK": SYS_IOLOCK}
-
-
-def stopsocket():
-    # socket终止
-    terminate_event.set()
-    with open("config.toml", "rb") as f:
-        config = tomllib.load(f)
-    clientsocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    host, port = "localhost", config["connect"]["port"]
-    clientsocket.connect((host, port))
-    clientsocket.close()
-
-    sys.exit()
-
-
-def consoled():
-    """控制台
-    若要添加控制台指令,在字典command_dict中添加即可"""
-    logger.info("Command example: [command]; ")
-    while True:
-        try:
-            i = input(">")
-        except (EOFError, UnboundLocalError):
-            pass
-        if i.endswith(";"):
-            command_dict = {
-                "exit;": stopsocket,
-            }
-            command_dict[str(i)]()
 
 
 # 获取初始绝对路径
@@ -180,7 +150,7 @@ if __name__ == "__main__":
             db_pool,
         ),
         name="FTPServerThread",
-        daemon=True
+        daemon=True,
     )
     FTPServerThread.start()
 
@@ -190,7 +160,7 @@ if __name__ == "__main__":
         target=taskScheduler.main,
         args=(ROOT_ABSPATH, terminate_event, db_pool),
         name="SchedulerThread",
-        daemon=True
+        daemon=True,
     )
     SchedulerThread.start()
 

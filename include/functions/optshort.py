@@ -116,11 +116,34 @@ def handle_operateShortcuts(instance, loaded_recv, user: Users):
             return
 
     elif action == "rename":
+        if not (new_shortcut_id := loaded_recv["data"].get("new_shortcut_id", None)):
+            instance.respond(**instance.RES_MISSING_ARGUMENT)
+            return
+
         if not "rename_shortcuts" in user.rights:
             instance.respond(**instance.RES_ACCESS_DENIED)
             return
         
-        ## TODO
+        with singine.Session() as session:
+
+            this_shortcut = session.get(Shortcuts, shortcut_id)
+
+            if not this_shortcut:
+                instance.respond(404, "shortcut does not exist")
+                return
+            
+            target_shortcut = session.get(Shortcuts, new_shortcut_id)
+
+            if target_shortcut:
+                instance.respond(-1, msg="New shortcut id is already used")
+                return
+
+            this_shortcut.short_id = new_shortcut_id
+
+            session.commit()
+
+        instance.respond(instance.RES_OK)
+        return
 
     else:
         instance.respond(400, msg=f"invaild action for operateShortcut: {action}")

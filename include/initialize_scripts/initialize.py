@@ -17,6 +17,7 @@ from Crypto.PublicKey import RSA
 from include.bulitin_class.users import AllUsers
 
 from include.database.operator import DatabaseOperator, getDBPool
+from include.functions import revfunc
 from include.util.usertools import createGroup, createUser
 
 
@@ -126,7 +127,9 @@ def initDatabaseStructure(db_pool):
     )
 
     # 插入初始数据，这里就懒得计算哈希值了
-    dboptr[1].executemany("INSERT INTO document_indexes(`id`, `path`) VALUES(?, ?)", insert_doc)
+    dboptr[1].executemany(
+        "INSERT INTO document_indexes(`id`, `path`) VALUES(?, ?)", insert_doc
+    )
     dboptr[0].commit()
 
     #######################
@@ -181,17 +184,24 @@ def initDatabaseStructure(db_pool):
 
     insert_doc_state = {"code": "ok", "expire_time": 0}
 
+    # create file_revisions table
+    # path_id refers to the entry in the path_structures table
+    dboptr[1].execute(
+        "CREATE TABLE `file_revisions`\
+                (`rev_id` VARCHAR(255) PRIMARY KEY, `path_id` VARCHAR(255), `parent_rev_id` VARCHAR(255), `created_time` INT, \
+                    `file_index_id` VARCHAR(255), `access_rules` TEXT, `external_access` TEXT, `state` INT,\
+                        `state_expire_time` INT)"
+    )
+
     import uuid
 
-    insert_doc_revisions = {
-        uuid.uuid4().hex: {
-            "file_id": "0",
-            "state": {"code": "ok", "expire_time": 0},
-            "access_rules": {},
-            "external_access": {},
-            "time": time.time(),
-        }
-    }
+    revfunc.addRevision(
+        "the_initial",
+        "0",
+        access_rules=insert_doc_access_rules,
+        external_access=insert_doc_external_access,
+        _override_existence_check = True
+    )
 
     insert_paths = (
         (
@@ -200,7 +210,7 @@ def initDatabaseStructure(db_pool):
             json.dumps((("user", "admin"),)),
             "dir01",
             "file",
-            json.dumps(insert_doc_revisions),
+            None,
             json.dumps(insert_doc_access_rules),
             json.dumps(insert_doc_external_access),
             json.dumps({}),
@@ -222,7 +232,6 @@ def initDatabaseStructure(db_pool):
     dboptr[1].executemany(
         "INSERT INTO path_structures VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", insert_paths
     )
-
 
     # create shortcut table
     dboptr[1].execute(
@@ -300,6 +309,7 @@ def initDatabaseStructure(db_pool):
     # 生成X25519私钥
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
     from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
     private_key = X25519PrivateKey.generate()
     with open("content/auth/x25519_pri", "wb") as x_pri_f:
         x_pri_f.write(private_key.private_bytes_raw())

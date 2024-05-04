@@ -39,7 +39,7 @@ class ProgrammedSystemExit(Exception):
     用于传递程序性退出的异常。
     """
 
-    pass
+class NoEndFlagError(Exception): ...
 
 
 class ThreadedSocketServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
@@ -144,6 +144,9 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
         self._pool = self.server._pool
 
+        # 该变量用于存储上次发包截断的下一个包的部分
+        self._tcp_last_remain: bytes = b''
+
         self.all_users = AllUsers(self._pool)
 
         # RSA 传输相关过程
@@ -183,24 +186,42 @@ class SocketHandler(socketserver.BaseRequestHandler):
             encrypted_data = self.aes_encrypt(
                 msg, self.aes_key
             )  # aes_encrypt() 接受文本
-            self.request.sendall(encrypted_data)
+            self.request.sendall(encrypted_data+b"\r\n") # + CRLF
         else:
-            self.request.sendall(msg_to_send)
+            self.request.sendall(msg_to_send+b"\r\n")
 
     def recv(self):
-        total_data = bytes()
+
+        total_data: bytes = bytes()
         while True:
             # 将收到的数据拼接起来
             data = self.request.recv(self.server.BUFFER_SIZE)
             total_data += data
             if len(data) < self.server.BUFFER_SIZE:
                 break
+
+        total_data = self._tcp_last_remain + total_data
+        
+        if b'\r\n' not in total_data:
+            print(total_data)
+            raise NoEndFlagError("No end flag found to seperate packs")
+
+        received_parts = total_data.split(b'\r\n')
+        this_pack_data = received_parts[0]
+
         if self.encrypted_connection:
-            decoded = self.aes_decrypt(total_data, self.aes_key)
+            decoded = self.aes_decrypt(this_pack_data, self.aes_key)
         else:
-            decoded = total_data.decode()
+            decoded = this_pack_data.decode()
         self.logger.debug(f"received decoded message: {decoded}")
+
+        # 保存未完的包数据
+        # 该函数改动后的可靠性仍待考证。
+        self._tcp_last_remain = total_data.lstrip(this_pack_data+b'\r\n')
+
         return decoded
+
+        
 
     def respond(self, code, msg=None, **content):
         """
@@ -220,7 +241,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
         self.send(json.dumps(_response))
 
-    def _setup_handshake(self) -> None:
+    def _do_handshake(self) -> None:
         # self.request.settimeout(10.0) # 设置超时
         try:
             receive = self.recv()
@@ -258,7 +279,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
 
         # available_key_exchange_methods = ["rsa", "x25519"] # 预先定义可用的方法
 
-        if ukem:=self.config["security"]["use_key_exchange_method"] == "rsa":
+        if (ukem:=self.config["security"]["use_key_exchange_method"]) == "rsa":
             self.send(
                 json.dumps(
                     {
@@ -335,6 +356,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
             except: raise ProgrammedSystemExit
 
         else:
+            print(ukem)
             raise RuntimeError
 
         return
@@ -365,7 +387,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
         es.install()
 
         try:
-            self._setup_handshake()
+            self._do_handshake()
         except ProgrammedSystemExit:
             raise
         except:
@@ -492,9 +514,6 @@ class SocketHandler(socketserver.BaseRequestHandler):
         )
 
         return
-        # self.logger.debug("正在终止与客户端和数据库的连接...")
-
-        # self.db_conn.close()
 
     def filterPathProperties(self, properties: dict):
         result = properties
@@ -509,30 +528,33 @@ class SocketHandler(socketserver.BaseRequestHandler):
             handle_cursor = couple[1]
 
             handle_cursor.execute(
-                "SELECT `revisions` FROM path_structures WHERE `id` = ?", (path_id,)
+                "SELECT `rev_id`, `created_time`, `state`, `state_expire_time` FROM file_revisions WHERE `path_id` = ?", (path_id,)
             )
-            query_result = handle_cursor.fetchall()
+            query_revisions = handle_cursor.fetchall()
 
-            if len(query_result) != 1:  # 由于主键互异性，可知其代表不存在
+            if len(query_revisions) == 0:  
                 raise ValueError("Specified ID does not exist")
                 # 这可能代表一种情况：数据库在操作的间隙间发生了变动。
 
             # 查询文档下的所有历史版本
-            query_revisions: dict = json.loads(query_result[0][0])
 
             newest_revision = ()  # by default
 
             # 排序
             sorted_revisions: list = sorted(
-                query_revisions.items(), key=lambda i: i[1]["time"], reverse=True
+                query_revisions, key=lambda i: i[1], reverse=True
             )
 
             # 如果已经删除
             for per_revision in sorted_revisions:  # per_revision is a tuple
                 if (
-                    per_revision[1]["state"]["code"] == "deleted"
+                    per_revision[2] != 0
                 ):  # 我们假定用户希望得到最新的版本是未被删除的
-                    continue
+                    if per_revision[2] == 1: # 若状态为删除
+                        continue
+                    elif per_revision[3] > time.time():
+                        continue
+
                 # 指定 newest
                 newest_revision = per_revision
                 break
@@ -558,6 +580,7 @@ class SocketHandler(socketserver.BaseRequestHandler):
                 raise RuntimeError("Wrong result length")
 
     def getFileSize(self, path_id, rev_id=None):
+        return -1
 
         with DatabaseOperator(self._pool) as couple:
 
