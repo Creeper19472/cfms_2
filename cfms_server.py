@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-CORE_VERSION = (1, 0, 0, "240504_alpha")
+CORE_VERSION = (1, 0, 0, "240606_alpha")
 READABLE_VERSION = ".".join(map(str, CORE_VERSION))
 
 __all__ = []  # Not designed for module-like use

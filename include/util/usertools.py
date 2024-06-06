@@ -5,7 +5,6 @@ This file defines quite a few of user functions.
 Used to function without a user instance.
 """
 
-
 import hashlib
 import secrets
 import string
@@ -13,13 +12,20 @@ import time
 from include.bulitin_class.users import AllUsers, Users
 from include.database.operator import DatabaseOperator
 
-class ExistingUserError(Exception):...
-class UserNotFoundError(Exception):...
+from include.experimental import singine
+
+
+class ExistingUserError(Exception): ...
+
+
+class UserNotFoundError(Exception): ...
+
 
 # class InvaildLengthError(Exception):...
 
 # class UsernameTooLongError(InvaildLengthError):...
 # class NicknameTooLongError(InvaildLengthError):...
+
 
 def getPasswdSHA256(passwd: str, salt: str):
     """
@@ -32,12 +38,17 @@ def getPasswdSHA256(passwd: str, salt: str):
     second_obj.update((raw_pwd_sha256 + salt).encode())
     return second_obj.hexdigest()
 
-def createUser(username: str, password: str, nickname=None, 
-               user_granted_rights: dict = {}, user_revoked_rights: dict = {},
-               user_groups: dict = {},
-               status: int = 0,
-               all_users: AllUsers = None):
-    
+
+def createUser(
+    username: str,
+    password: str,
+    nickname=None,
+    user_granted_rights: dict = {},
+    user_revoked_rights: dict = {},
+    user_groups: dict = {},
+    status: int = 0,
+    all_users: AllUsers = None,
+):
     """
     在这里我们规定了 user_granted_rights 及其类似参数的格式：
 
@@ -53,7 +64,9 @@ def createUser(username: str, password: str, nickname=None,
     """
 
     if not all_users:
-        raise NotImplementedError("Cannot function without all_users given at this time")
+        raise NotImplementedError(
+            "Cannot function without all_users given at this time"
+        )
 
     if not nickname:
         nickname = username
@@ -62,7 +75,7 @@ def createUser(username: str, password: str, nickname=None,
         raise ValueError("username too long")
     if len(nickname) > 64:
         raise ValueError("user nickname too long")
-        
+
     # 判断用户是否存在
     if username in all_users:
         raise RuntimeError("user exists")
@@ -79,15 +92,16 @@ def createUser(username: str, password: str, nickname=None,
         salt,
         nickname,
         status,
-        0, # last_login
-        created_time:=time.time()
+        0,  # last_login
+        created_time := time.time(),
     )
 
     with DatabaseOperator(all_users._db_pool) as dboptr:
 
         dboptr[1].execute(
             "INSERT INTO `users` (`username`, `password`, `salt`, `nickname`, `status`, `last_login`, \
-                `created_time`) VALUES(?, ?, ?, ?, ?, ?, ?)", insert_user
+                `created_time`) VALUES(?, ?, ?, ?, ?, ?, ?)",
+            insert_user,
         )
 
         user_row_id = dboptr[1].lastrowid
@@ -97,47 +111,76 @@ def createUser(username: str, password: str, nickname=None,
         insert_perms = []
 
         for perm_name in user_granted_rights:
-            insert_perms.append((user_row_id, perm_name, "right", "granted", user_granted_rights[perm_name]))
+            insert_perms.append(
+                (
+                    user_row_id,
+                    perm_name,
+                    "right",
+                    "granted",
+                    user_granted_rights[perm_name],
+                )
+            )
 
         for perm_name in user_revoked_rights:
-            insert_perms.append((user_row_id, perm_name, "right", "revoked", user_revoked_rights[perm_name]))
+            insert_perms.append(
+                (
+                    user_row_id,
+                    perm_name,
+                    "right",
+                    "revoked",
+                    user_revoked_rights[perm_name],
+                )
+            )
 
         for perm_name in user_groups:
-            insert_perms.append((user_row_id, perm_name, "group", "granted", user_groups[perm_name]))
-                                
+            insert_perms.append(
+                (user_row_id, perm_name, "group", "granted", user_groups[perm_name])
+            )
+
         dboptr[1].executemany(
             "INSERT INTO `user_permissions` (`user_id`, `perm_name`, `perm_type`, `mode`, `expire_time`) \
-                VALUES(?, ?, ?, ?, ?)", insert_perms
+                VALUES(?, ?, ?, ?, ?)",
+            insert_perms,
         )
 
-        dboptr[0].commit() # 在这里提交，意味着给定的 dboptr 最好是“干净”的
+        dboptr[0].commit()  # 在这里提交，意味着给定的 dboptr 最好是“干净”的
 
     return
 
-def createGroup(group_id: str, group_name: str = None, 
-               group_granted_rights: dict = {}, group_revoked_rights: dict = {},
-               status: int = 0,
-               dboptr: DatabaseOperator = None):
+
+def createGroup(
+    group_id: str,
+    group_name: str = None,
+    group_granted_rights: dict = {},
+    group_revoked_rights: dict = {},
+    status: int = 0,
+    dboptr: DatabaseOperator = None,
+):
     if not dboptr:
         raise NotImplementedError("Cannot function without DatabaseOperator")
-    
+
     if not group_name:
         group_name = group_id
-    
+
     if len(group_id) > 32:  # (technically) max 255
         raise ValueError("group_id too long")
 
     if len(group_name) > 64:  # max 255
         raise ValueError("group_name too long")
-    
-    dboptr[1].execute("SELECT count(`g_id`) FROM `groups` WHERE `g_id` = ?", (group_id,))
+
+    dboptr[1].execute(
+        "SELECT count(`g_id`) FROM `groups` WHERE `g_id` = ?", (group_id,)
+    )
     same_g_id_count = dboptr[1].fetchone()[0]
 
     if same_g_id_count:
         raise RuntimeError("group exists")
-    
-    dboptr[1].execute("INSERT INTO `groups` (`g_id`, `group_name`, `status`) VALUES (?, ?, ?)", (group_id, group_name, status))
-    
+
+    dboptr[1].execute(
+        "INSERT INTO `groups` (`g_id`, `group_name`, `status`) VALUES (?, ?, ?)",
+        (group_id, group_name, status),
+    )
+
     group_row_id = dboptr[1].lastrowid
 
     # 逐条插入权限设定
@@ -145,17 +188,21 @@ def createGroup(group_id: str, group_name: str = None,
     insert_rights = []
 
     for right in group_granted_rights:
-        insert_rights.append((group_row_id, right, "granted", group_granted_rights[right]))
+        insert_rights.append(
+            (group_row_id, right, "granted", group_granted_rights[right])
+        )
 
     for right in group_revoked_rights:
-        insert_rights.append((group_row_id, right, "revoked", group_revoked_rights[right]))
-                            
+        insert_rights.append(
+            (group_row_id, right, "revoked", group_revoked_rights[right])
+        )
+
     dboptr[1].executemany(
         "INSERT INTO `group_rights` (`id`, `right`, `mode`, `expire_time`) \
-            VALUES(?, ?, ?, ?)", insert_rights
+            VALUES(?, ?, ?, ?)",
+        insert_rights,
     )
 
-    dboptr[0].commit() # 在这里提交，意味着给定的 dboptr 最好是“干净”的
+    dboptr[0].commit()  # 在这里提交，意味着给定的 dboptr 最好是“干净”的
 
     return
-

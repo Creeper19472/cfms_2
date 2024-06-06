@@ -131,6 +131,7 @@ def handle_operateDir(instance, loaded_recv, user: Users):
                 return
 
     parent_id = result[0][1]  # 文件夹的父级目录 ID
+    directory_name = result[0][0]
 
     if action in [
         "list",
@@ -233,7 +234,9 @@ def handle_operateDir(instance, loaded_recv, user: Users):
                         # "properties": instance.filterPathProperties(parent_properties)
                     }
 
-            instance.respond(**{"code": 0, "dir_data": dir_result})
+            instance.respond(
+                **{"code": 0, "dir_name": directory_name, "dir_data": dir_result}
+            )
 
         elif action == "delete":
             recycle_policy = Policies("recycle", *dboptr)

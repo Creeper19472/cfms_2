@@ -29,6 +29,7 @@ from include.database.operator import DatabaseOperator
 from include.functions import auth, optfile, optdir, optgroup, optpol, optshort
 from include.logtool import getCustomLogger
 
+from include.util.img2base64 import convertFile2Base64
 
 class HandshakeError(Exception):
     pass
@@ -1062,6 +1063,8 @@ class SocketHandler(socketserver.BaseRequestHandler):
                         0,
                         token=user.generateUserToken(("all"), 3600, token_secret),
                         ftp_port=self.server.config["connect"]["ftp_port"],
+                        user_avatar=convertFile2Base64("./content/files/user.png").decode() 
+                        # temp fix, should be updated as soon as related functions is rewrited
                     )
 
                 else:
